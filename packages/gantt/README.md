@@ -50,12 +50,31 @@ const gantt = new VanillaGantt(document.querySelector('#gantt'), {
     endDateField: 'endDate',
     progressField: 'progress',
     labelText: 'title',
+    draggable: true,
+    dragStep: 5 * 60 * 1000,
     customLayout: ({ task }) => `
       <div class="my-task">
         <strong>${task.title || ''}</strong>
         <span>${task.subtitle || ''}</span>
       </div>
-    `
+    `,
+    tooltip: {
+      customLayout: ({ task, startDate, endDate }) => `
+        <div class="my-tooltip">
+          <strong>${task.title || ''}</strong>
+          <span>${startDate.toLocaleString()} - ${endDate.toLocaleString()}</span>
+        </div>
+      `
+    },
+    onClick: ({ task }) => {
+      console.log('task click', task)
+    },
+    onContextMenu: ({ task, event }) => {
+      console.log('task contextmenu', task, event)
+    },
+    onDragEnd: ({ sourceTask, startDate, endDate }) => {
+      console.log('task dragged', sourceTask, startDate, endDate)
+    }
   }
 })
 
@@ -73,6 +92,7 @@ gantt.destroy()
 
 Custom renderers can return an HTML template string, a `Node`, or `{ rootContainer }`.
 For a custom tree cell, put `data-vg-toggle` on the toggle element and the gantt instance will bind expand/collapse automatically.
+For controls inside a custom task template, put `data-vg-no-drag` on the element to prevent it from starting task dragging.
 
 ## Build
 

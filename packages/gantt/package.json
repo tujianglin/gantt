@@ -1,5 +1,5 @@
 {
-  "name": "@vue2-gantt/gantt",
+  "name": "@wimi/gantt",
   "version": "0.1.0",
   "description": "Framework-agnostic SVG scheduling gantt chart.",
   "private": true,

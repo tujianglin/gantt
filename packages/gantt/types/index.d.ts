@@ -27,6 +27,7 @@ export interface GanttTaskRecord {
   progress?: number
   locked?: boolean
   striped?: boolean
+  draggable?: boolean
   logistics?: boolean
   completed?: boolean
   predecessorIncomplete?: boolean
@@ -147,7 +148,25 @@ export interface GanttTaskBarOptions {
   projectStyle?: GanttTaskBarStyle | ((args: GanttTaskBarInteractionContext) => GanttTaskBarStyle)
   customLayout?: GanttRenderer<GanttTaskBarCustomLayoutContext>
   clip?: boolean
+  draggable?: boolean | ((context: GanttTaskBarCustomLayoutContext) => boolean)
+  dragStep?: number
+  tooltip?: boolean | GanttTaskBarTooltipOptions
+  onClick?: (context: GanttTaskBarEventContext) => void
+  onContextMenu?: (context: GanttTaskBarEventContext) => void
+  onMouseEnter?: (context: GanttTaskBarEventContext) => void
+  onMouseLeave?: (context: GanttTaskBarEventContext) => void
+  onDragStart?: (context: GanttTaskBarDragContext) => false | void
+  onDrag?: (context: GanttTaskBarDragContext) => void
+  onDragEnd?: (context: GanttTaskBarDragContext) => void
   lanes?: GanttLane[]
+}
+
+export interface GanttTaskBarTooltipOptions {
+  visible?: boolean
+  customLayout?: GanttRenderer<GanttTaskBarEventContext>
+  className?: string
+  offsetX?: number
+  offsetY?: number
 }
 
 export type GanttDependencyType =
@@ -248,14 +267,33 @@ export interface GanttTaskBarInteractionContext {
 export interface GanttTaskBarCustomLayoutContext extends GanttRenderContext {
   taskRecord: GanttTaskRecord
   task: GanttTaskRecord
+  sourceTask?: GanttTaskRecord
   rowRecord?: GanttRecord & { level: number }
   row?: GanttRecord & { level: number }
+  taskKey?: string | number
+  rowKey?: string | number
+  x: number
+  y: number
   width: number
   height: number
   startDate: Date
   endDate: Date
+  originalStartDate?: Date
+  originalEndDate?: Date
   progress?: number
+  event?: Event
   ganttInstance: VanillaGantt
+}
+
+export interface GanttTaskBarEventContext extends GanttTaskBarCustomLayoutContext {
+  event: MouseEvent | PointerEvent
+}
+
+export interface GanttTaskBarDragContext extends GanttTaskBarCustomLayoutContext {
+  event: PointerEvent
+  sourceTask: GanttTaskRecord
+  originalStartDate: Date
+  originalEndDate: Date
 }
 
 export interface GanttTimelineRenderContext extends GanttRenderContext {

@@ -64,6 +64,15 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;')
 }
 
+function formatTooltipDate(date) {
+  const value = date instanceof Date ? date : new Date(date)
+  const month = String(value.getMonth() + 1).padStart(2, '0')
+  const day = String(value.getDate()).padStart(2, '0')
+  const hour = String(value.getHours()).padStart(2, '0')
+  const minute = String(value.getMinutes()).padStart(2, '0')
+  return `${month}-${day} ${hour}:${minute}`
+}
+
 export default {
   name: 'WorkOrderStatusDemo',
   data() {
@@ -90,6 +99,11 @@ export default {
         },
         taskBar: {
           customLayout: this.renderTask,
+          draggable: ({ task }) => !task.logistics && !task.parentAggregate,
+          dragStep: 5 * 60 * 1000,
+          tooltip: {
+            customLayout: this.renderTaskTooltip
+          },
           lanes: [
             { key: 'plan', offset: 8, height: 58 },
             { key: 'load', offset: 70, height: 6 },
@@ -298,6 +312,15 @@ export default {
           <div class="work-task-title">${escapeHtml(task.title)}</div>
           <div class="work-task-meta">${escapeHtml(task.subtitle)}${progressText}</div>
           ${progressBar}
+        </div>
+      `
+    },
+    renderTaskTooltip({ task, row, startDate, endDate }) {
+      return `
+        <div class="work-tooltip">
+          <strong>${escapeHtml(task.title)}</strong>
+          <span>${escapeHtml(row && row.name)} / ${escapeHtml(task.subtitle)}</span>
+          <time>${escapeHtml(formatTooltipDate(startDate))} - ${escapeHtml(formatTooltipDate(endDate))}</time>
         </div>
       `
     }

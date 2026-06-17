@@ -44,6 +44,22 @@ const DEFAULT_OPTIONS = {
     projectStyle: null,
     customLayout: null,
     clip: true,
+    draggable: true,
+    dragStep: 60 * 1000,
+    tooltip: {
+      visible: true,
+      customLayout: null,
+      className: '',
+      offsetX: 12,
+      offsetY: 12
+    },
+    onClick: null,
+    onContextMenu: null,
+    onMouseEnter: null,
+    onMouseLeave: null,
+    onDragStart: null,
+    onDrag: null,
+    onDragEnd: null,
     lanes: [
       { key: 'plan', offset: 8, height: 36 },
       { key: 'load', offset: 52, height: 6 },
@@ -78,6 +94,9 @@ export default class VanillaGantt {
     this.scrollTop = 0
     this.scrollLeft = 0
     this.disposers = []
+    this.activeDrag = null
+    this.suppressClickUntil = 0
+    this.suppressClickTaskKey = null
     this.seedExpandedRows(this.options.records)
     this.render()
   }
@@ -97,6 +116,7 @@ export default class VanillaGantt {
   }
 
   cleanup() {
+    this.hideTaskTooltip()
     this.disposers.forEach(dispose => dispose())
     this.disposers = []
   }
@@ -609,7 +629,7 @@ export default class VanillaGantt {
   renderTask(task) {
     const width = this.durationWidth(this.taskStart(task), this.taskEnd(task))
     const height = this.taskRenderHeight(task)
-    const fo = svgEl('foreignObject')
+    const fo = svgEl('foreignObject', 'vg-task-fo')
     attrs(fo, {
       x: this.timeToX(this.taskStart(task)),
       y: this.taskY(task),
@@ -618,22 +638,338 @@ export default class VanillaGantt {
     })
 
     const row = this.rowById[task.__rowId]
-    const payload = {
-      taskRecord: task,
-      task,
-      rowRecord: row,
+    const payload = this.createTaskPayload(task, {
       row,
       width,
       height,
-      startDate: new Date(toTime(this.taskStart(task))),
-      endDate: new Date(toTime(this.taskEnd(task))),
+      x: this.timeToX(this.taskStart(task)),
+      y: this.taskY(task)
+    })
+    const custom = this.resolveContent(this.taskBar.customLayout, payload)
+    fo.append(custom || this.renderDefaultTask(task))
+    this.bindTaskInteractions(fo, task)
+    return fo
+  }
+
+  bindTaskInteractions(node, task) {
+    if (this.isTaskDraggable(task)) {
+      node.classList.add('vg-task-fo--draggable')
+    }
+
+    const onClick = event => {
+      const taskKey = this.taskKey(task)
+      if (this.suppressClickTaskKey === taskKey && Date.now() < this.suppressClickUntil) {
+        event.preventDefault()
+        event.stopPropagation()
+        return
+      }
+      this.callTaskCallback('onClick', task, event)
+    }
+    const onContextMenu = event => {
+      if (typeof this.taskBar.onContextMenu !== 'function') return
+      event.preventDefault()
+      this.callTaskCallback('onContextMenu', task, event)
+    }
+    const onMouseEnter = event => {
+      this.callTaskCallback('onMouseEnter', task, event)
+      this.showTaskTooltip(task, event)
+    }
+    const onMouseMove = event => {
+      this.positionTaskTooltip(event)
+    }
+    const onMouseLeave = event => {
+      this.callTaskCallback('onMouseLeave', task, event)
+      this.hideTaskTooltip()
+    }
+    const onPointerDown = event => {
+      this.startTaskDrag(node, task, event)
+    }
+
+    node.addEventListener('click', onClick)
+    node.addEventListener('contextmenu', onContextMenu)
+    node.addEventListener('mouseenter', onMouseEnter)
+    node.addEventListener('mousemove', onMouseMove)
+    node.addEventListener('mouseleave', onMouseLeave)
+    node.addEventListener('pointerdown', onPointerDown)
+    this.disposers.push(() => {
+      node.removeEventListener('click', onClick)
+      node.removeEventListener('contextmenu', onContextMenu)
+      node.removeEventListener('mouseenter', onMouseEnter)
+      node.removeEventListener('mousemove', onMouseMove)
+      node.removeEventListener('mouseleave', onMouseLeave)
+      node.removeEventListener('pointerdown', onPointerDown)
+    })
+  }
+
+  startTaskDrag(node, task, event) {
+    if (!this.isTaskDraggable(task)) return
+    if (event.button !== undefined && event.button !== 0) return
+    if (event.target && event.target.closest && event.target.closest('[data-vg-no-drag]')) return
+
+    const sourceTask = this.findSourceTask(task)
+    if (!sourceTask) return
+
+    const startTime = toTime(this.taskStart(sourceTask))
+    const endTime = toTime(this.taskEnd(sourceTask))
+    if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return
+
+    const startPayload = this.createTaskPayload(task, {
+      event,
+      sourceTask,
+      startDate: new Date(startTime),
+      endDate: new Date(endTime),
+      originalStartDate: new Date(startTime),
+      originalEndDate: new Date(endTime)
+    })
+    if (this.callTaskCallback('onDragStart', task, event, startPayload) === false) return
+
+    this.hideTaskTooltip()
+    node.classList.add('vg-task-fo--dragging')
+    if (node.setPointerCapture && event.pointerId !== undefined) {
+      node.setPointerCapture(event.pointerId)
+    }
+
+    const drag = {
+      node,
+      task,
+      sourceTask,
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      originalStartTime: startTime,
+      originalEndTime: endTime,
+      nextStartTime: startTime,
+      nextEndTime: endTime,
+      moved: false
+    }
+    this.activeDrag = drag
+
+    const onMove = moveEvent => this.moveTaskDrag(moveEvent)
+    const onUp = upEvent => {
+      document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('pointerup', onUp)
+      document.removeEventListener('pointercancel', onUp)
+      this.endTaskDrag(upEvent)
+    }
+    document.addEventListener('pointermove', onMove)
+    document.addEventListener('pointerup', onUp)
+    document.addEventListener('pointercancel', onUp)
+    this.disposers.push(() => {
+      document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('pointerup', onUp)
+      document.removeEventListener('pointercancel', onUp)
+    })
+
+    event.preventDefault()
+    event.stopPropagation()
+  }
+
+  moveTaskDrag(event) {
+    const drag = this.activeDrag
+    if (!drag) return
+    if (drag.pointerId !== undefined && event.pointerId !== undefined && drag.pointerId !== event.pointerId) return
+
+    const deltaX = event.clientX - drag.startClientX
+    if (Math.abs(deltaX) < 2 && !drag.moved) return
+
+    const deltaMs = this.snapDragDelta(deltaX / this.pxPerMs)
+    const nextRange = this.clampDragRange(drag.originalStartTime + deltaMs, drag.originalEndTime + deltaMs)
+    drag.nextStartTime = nextRange.start
+    drag.nextEndTime = nextRange.end
+    drag.moved = true
+    drag.node.setAttribute('x', this.timeToX(nextRange.start))
+
+    this.callTaskCallback('onDrag', drag.task, event, this.createTaskPayload(drag.task, {
+      event,
+      sourceTask: drag.sourceTask,
+      startDate: new Date(nextRange.start),
+      endDate: new Date(nextRange.end),
+      originalStartDate: new Date(drag.originalStartTime),
+      originalEndDate: new Date(drag.originalEndTime)
+    }))
+    event.preventDefault()
+  }
+
+  endTaskDrag(event) {
+    const drag = this.activeDrag
+    if (!drag) return
+    this.activeDrag = null
+    drag.node.classList.remove('vg-task-fo--dragging')
+    if (drag.node.releasePointerCapture && drag.pointerId !== undefined) {
+      try {
+        drag.node.releasePointerCapture(drag.pointerId)
+      } catch (error) {}
+    }
+
+    if (drag.moved) {
+      this.updateTaskTime(drag.sourceTask, drag.nextStartTime, drag.nextEndTime)
+      this.suppressClickTaskKey = this.taskKey(drag.task)
+      this.suppressClickUntil = Date.now() + 300
+      this.callTaskCallback('onDragEnd', drag.task, event, this.createTaskPayload(drag.task, {
+        event,
+        sourceTask: drag.sourceTask,
+        startDate: new Date(drag.nextStartTime),
+        endDate: new Date(drag.nextEndTime),
+        originalStartDate: new Date(drag.originalStartTime),
+        originalEndDate: new Date(drag.originalEndTime)
+      }))
+      this.render()
+    }
+  }
+
+  showTaskTooltip(task, event) {
+    const tooltip = this.taskTooltip
+    if (!tooltip || tooltip.visible === false) return
+
+    const payload = this.createTaskPayload(task, { event })
+    const content = this.resolveContent(tooltip.customLayout, payload) || this.renderDefaultTaskTooltip(payload)
+    if (!content) return
+
+    this.hideTaskTooltip()
+    const node = el('div', `vg-tooltip${tooltip.className ? ` ${tooltip.className}` : ''}`)
+    node.append(content)
+    document.body.append(node)
+    this.tooltipEl = node
+    this.positionTaskTooltip(event)
+  }
+
+  positionTaskTooltip(event) {
+    if (!this.tooltipEl || !event) return
+    const tooltip = this.taskTooltip || {}
+    const offsetX = tooltip.offsetX === undefined ? 12 : Number(tooltip.offsetX)
+    const offsetY = tooltip.offsetY === undefined ? 12 : Number(tooltip.offsetY)
+    const rect = this.tooltipEl.getBoundingClientRect()
+    const maxLeft = window.innerWidth - rect.width - 8
+    const maxTop = window.innerHeight - rect.height - 8
+    const left = Math.max(8, Math.min(maxLeft, event.clientX + offsetX))
+    const top = Math.max(8, Math.min(maxTop, event.clientY + offsetY))
+    this.tooltipEl.style.left = `${left}px`
+    this.tooltipEl.style.top = `${top}px`
+  }
+
+  hideTaskTooltip() {
+    if (!this.tooltipEl) return
+    this.tooltipEl.remove()
+    this.tooltipEl = null
+  }
+
+  renderDefaultTaskTooltip(payload) {
+    const root = el('div', 'vg-tooltip-default')
+    const title = el('div', 'vg-tooltip-title')
+    title.textContent = this.taskLabel(payload.task, this.taskBar.labelText)
+    const time = el('div', 'vg-tooltip-time')
+    time.textContent = `${formatDateTime(payload.startDate)} - ${formatDateTime(payload.endDate)}`
+    root.append(title, time)
+    const subtitle = this.taskLabel(payload.task, this.taskBar.subLabelText)
+    if (subtitle) {
+      const meta = el('div', 'vg-tooltip-meta')
+      meta.textContent = subtitle
+      root.append(meta)
+    }
+    return root
+  }
+
+  createTaskPayload(task, extra = {}) {
+    const row = extra.row || this.rowById[task.__rowId]
+    const sourceTask = extra.sourceTask || this.findSourceTask(task) || task
+    const startTime = extra.startDate ? extra.startDate.getTime() : toTime(this.taskStart(sourceTask))
+    const endTime = extra.endDate ? extra.endDate.getTime() : toTime(this.taskEnd(sourceTask))
+    const width = extra.width === undefined ? this.durationWidth(this.taskStart(task), this.taskEnd(task)) : extra.width
+    const height = extra.height === undefined ? this.taskRenderHeight(task) : extra.height
+
+    return {
+      taskRecord: sourceTask,
+      task,
+      sourceTask,
+      rowRecord: row,
+      row,
+      taskKey: this.taskKey(task),
+      rowKey: task.__rowId,
+      x: extra.x === undefined ? this.timeToX(this.taskStart(task)) : extra.x,
+      y: extra.y === undefined ? this.taskY(task) : extra.y,
+      width,
+      height,
+      startDate: new Date(startTime),
+      endDate: new Date(endTime),
+      originalStartDate: extra.originalStartDate,
+      originalEndDate: extra.originalEndDate,
       progress: this.taskProgress(task),
+      event: extra.event,
       ganttInstance: this,
       gantt: this
     }
-    const custom = this.resolveContent(this.taskBar.customLayout, payload)
-    fo.append(custom || this.renderDefaultTask(task))
-    return fo
+  }
+
+  callTaskCallback(name, task, event, payload) {
+    const callback = this.taskBar[name]
+    if (typeof callback !== 'function') return undefined
+    return callback(payload || this.createTaskPayload(task, { event }))
+  }
+
+  isTaskDraggable(task) {
+    if (task.draggable !== undefined) return task.draggable !== false
+    if (task.parentAggregate) return false
+    const draggable = this.taskBar.draggable
+    if (typeof draggable === 'function') {
+      return draggable(this.createTaskPayload(task)) !== false
+    }
+    return draggable !== false
+  }
+
+  findSourceTask(task) {
+    const rowKey = task.__rowId
+    const taskKey = this.taskKey(task)
+    if (!rowKey || !taskKey) return null
+    const record = this.findRecordByKey(rowKey)
+    const tasks = record && Array.isArray(record[this.taskBar.tasksField]) ? record[this.taskBar.tasksField] : []
+    return tasks.find(item => this.taskKey(item) === taskKey) || null
+  }
+
+  findRecordByKey(recordKey, records = this.options.records) {
+    for (const record of records || []) {
+      if (this.recordKey(record) === recordKey) return record
+      if (record.children) {
+        const found = this.findRecordByKey(recordKey, record.children)
+        if (found) return found
+      }
+    }
+    return null
+  }
+
+  snapDragDelta(deltaMs) {
+    const step = Number(this.taskBar.dragStep || 0)
+    if (!step) return deltaMs
+    return Math.round(deltaMs / step) * step
+  }
+
+  clampDragRange(startTime, endTime) {
+    const duration = endTime - startTime
+    if (duration >= this.rangeMs) {
+      return { start: this.startTime, end: this.endTime }
+    }
+    let start = startTime
+    let end = endTime
+    if (start < this.startTime) {
+      start = this.startTime
+      end = start + duration
+    }
+    if (end > this.endTime) {
+      end = this.endTime
+      start = end - duration
+    }
+    return { start, end }
+  }
+
+  updateTaskTime(task, startTime, endTime) {
+    const startField = this.taskBar.startDateField
+    const endField = this.taskBar.endDateField
+    task[startField] = this.createTimeValueLike(task[startField], startTime)
+    task[endField] = this.createTimeValueLike(task[endField], endTime)
+  }
+
+  createTimeValueLike(source, time) {
+    if (source instanceof Date) return new Date(time)
+    if (typeof source === 'number') return time
+    return formatLocalDateTime(new Date(time))
   }
 
   renderDefaultTask(task) {
@@ -975,6 +1311,13 @@ export default class VanillaGantt {
     return this.options.taskBar || {}
   }
 
+  get taskTooltip() {
+    const tooltip = this.taskBar.tooltip
+    if (tooltip === false) return null
+    if (tooltip === true || tooltip === undefined || tooltip === null) return DEFAULT_OPTIONS.taskBar.tooltip
+    return tooltip
+  }
+
   get dependency() {
     return this.options.dependency || {}
   }
@@ -1284,6 +1627,8 @@ export default class VanillaGantt {
 }
 
 function mergeOptions(base, patch) {
+  const baseTaskBar = base.taskBar || {}
+  const patchTaskBar = patch.taskBar || {}
   return {
     ...base,
     ...patch,
@@ -1299,11 +1644,12 @@ function mergeOptions(base, patch) {
         : (base.timelineHeader && base.timelineHeader.scales) || []
     },
     taskBar: {
-      ...(base.taskBar || {}),
-      ...(patch.taskBar || {}),
-      lanes: patch.taskBar && patch.taskBar.lanes
-        ? patch.taskBar.lanes
-        : (base.taskBar && base.taskBar.lanes) || []
+      ...baseTaskBar,
+      ...patchTaskBar,
+      tooltip: mergeNestedOption(baseTaskBar.tooltip, patchTaskBar.tooltip),
+      lanes: patchTaskBar.lanes
+        ? patchTaskBar.lanes
+        : baseTaskBar.lanes || []
     },
     dependency: {
       ...(base.dependency || {}),
@@ -1324,6 +1670,18 @@ function mergeOptions(base, patch) {
     },
     records: patch.records || base.records || []
   }
+}
+
+function mergeNestedOption(base, patch) {
+  if (patch === undefined) return base
+  if (patch === false || patch === true || patch === null) return patch
+  if (typeof patch === 'object' && !Array.isArray(patch)) {
+    return {
+      ...(typeof base === 'object' && base ? base : {}),
+      ...patch
+    }
+  }
+  return patch
 }
 
 function applyTimelineStyle(node, style = {}) {
@@ -1368,4 +1726,23 @@ function toTime(value) {
   if (typeof value === 'number') return value
   if (value instanceof Date) return value.getTime()
   return new Date(value).getTime()
+}
+
+function formatDateTime(date) {
+  const value = date instanceof Date ? date : new Date(date)
+  const month = String(value.getMonth() + 1).padStart(2, '0')
+  const day = String(value.getDate()).padStart(2, '0')
+  const hour = String(value.getHours()).padStart(2, '0')
+  const minute = String(value.getMinutes()).padStart(2, '0')
+  return `${value.getFullYear()}-${month}-${day} ${hour}:${minute}`
+}
+
+function formatLocalDateTime(date) {
+  const value = date instanceof Date ? date : new Date(date)
+  const month = String(value.getMonth() + 1).padStart(2, '0')
+  const day = String(value.getDate()).padStart(2, '0')
+  const hour = String(value.getHours()).padStart(2, '0')
+  const minute = String(value.getMinutes()).padStart(2, '0')
+  const second = String(value.getSeconds()).padStart(2, '0')
+  return `${value.getFullYear()}-${month}-${day}T${hour}:${minute}:${second}`
 }
