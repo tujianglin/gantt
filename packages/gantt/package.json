@@ -1,0 +1,24 @@
+{
+  "name": "@vue2-gantt/gantt",
+  "version": "0.1.0",
+  "description": "Framework-agnostic SVG scheduling gantt chart.",
+  "private": true,
+  "main": "dist/VanillaGantt.common.js",
+  "module": "src/index.js",
+  "unpkg": "dist/VanillaGantt.umd.min.js",
+  "style": "dist/VanillaGantt.css",
+  "types": "types/index.d.ts",
+  "files": [
+    "dist",
+    "src",
+    "types",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "cd ../.. && vue-cli-service build --target lib --name VanillaGantt packages/gantt/src/index.js --dest packages/gantt/dist"
+  },
+  "sideEffects": [
+    "*.css",
+    "src/*.css"
+  ]
+}

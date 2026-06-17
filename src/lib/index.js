@@ -1,1 +1,1 @@
-export { default as VanillaGantt } from './VanillaGantt'
+export { default, VanillaGantt } from '../../packages/gantt/src/index'

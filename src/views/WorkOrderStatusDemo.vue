@@ -1,48 +1,54 @@
 <template>
   <section class="demo-view">
-    <DemoToolbar
-      :start="start"
-      :end="end"
-      :scale-key="scaleKey"
-      :scales="scaleOptions"
-      @update:start="start = $event"
-      @update:end="end = $event"
-      @update:scale-key="scaleKey = $event"
-    />
-    <WorkOrderLegend />
-    <div class="chart-wrap">
-      <VanillaGanttHost
-        :rows="rows"
-        :tasks="tasks"
-        :blocks="blocks"
-        :links="links"
-        :rest-ranges="restRanges"
-        :start="start"
-        :end="end"
-        now="2026-03-30T12:00"
-        :time-scale="timeScale"
-        :row-height="92"
-        :initial-left-width="150"
-        :lanes="lanes"
-        :render-task="renderTask"
-      />
+    <div class="demo-toolbar">
+      <label>
+        <span>开始</span>
+        <input v-model="start" type="datetime-local" />
+      </label>
+      <label>
+        <span>结束</span>
+        <input v-model="end" type="datetime-local" />
+      </label>
+      <label>
+        <span>刻度</span>
+        <select v-model="scaleKey">
+          <option v-for="scale in scaleOptions" :key="scale.key" :value="scale.key">
+            {{ scale.label }}
+          </option>
+        </select>
+      </label>
     </div>
+    <div class="legend">
+      <section>
+        <h3>物流单状态图例</h3>
+        <div v-for="item in logisticsLegend" :key="item.label" class="legend-row">
+          <i class="legend-swatch" :style="{ background: item.color }"></i>
+          <span>{{ item.label }}</span>
+        </div>
+      </section>
+      <section>
+        <h3>工单状态图例</h3>
+        <div v-for="item in workOrderLegend" :key="item.label" class="legend-row">
+          <i
+            class="legend-swatch"
+            :class="item.className"
+            :style="{ background: item.color, borderColor: item.borderColor }"
+          ></i>
+          <span>{{ item.label }}</span>
+        </div>
+      </section>
+    </div>
+    <div ref="gantt" class="chart-wrap"></div>
   </section>
 </template>
 
 <script>
-import VanillaGanttHost from '../components/VanillaGanttHost.vue'
-import DemoToolbar from '../components/DemoToolbar.vue'
-import WorkOrderLegend from '../components/demo/WorkOrderLegend.vue'
-import { scaleOptions } from '../demo/timeScales'
+import { VanillaGantt } from '../lib'
+
+const scaleOptions = createScaleOptions()
 
 export default {
   name: 'WorkOrderStatusDemo',
-  components: {
-    VanillaGanttHost,
-    DemoToolbar,
-    WorkOrderLegend
-  },
   data() {
     const rows = this.createRows()
     const tasks = this.createTasks()
@@ -76,7 +82,31 @@ export default {
       start: '2026-03-30T02:00',
       end: '2026-04-01T08:00',
       scaleKey: '2h',
-      scaleOptions
+      scaleOptions,
+      gantt: null,
+      logisticsLegend: [
+        { label: '上料物流单已完成', color: '#d9d9d9' },
+        { label: '上料物流单执行中', color: '#2f9bff' },
+        { label: '上料物流单待执行', color: '#bfe7ff' },
+        { label: '下料物流单已完成', color: '#969696' },
+        { label: '下料物流单执行中', color: '#9652e6' },
+        { label: '下料物流单待执行', color: '#eadbff' }
+      ],
+      workOrderLegend: [
+        { label: '未开启', color: '#d8d8d8', className: 'legend-dot' },
+        { label: '进度正常', color: '#40c51b', className: 'legend-dot' },
+        { label: '轻微滞后', color: '#ffa51d', className: 'legend-dot' },
+        { label: '严重滞后', color: '#ff4756', className: 'legend-dot' },
+        { label: '已完成工单', color: '#fff', className: 'legend-striped' },
+        { label: '前序外协未完成', color: '#ffe8bd' },
+        { label: '重排前移', color: '#fff', borderColor: '#40c51b' },
+        { label: '重排后移', color: '#fff', borderColor: '#ff4b55' },
+        { label: '非班次时间', color: '#ffffff', borderColor: '#edf1f2' },
+        { label: '班次时间', color: '#f2f3f3' },
+        { label: '冻结区非班次时间', color: '#d7d7d7' },
+        { label: '冻结区班次时间', color: '#bdbdbd' },
+        { label: '停机时间', color: '#fdeeee' }
+      ]
     }
   },
   computed: {
@@ -84,7 +114,38 @@ export default {
       return this.scaleOptions.find(scale => scale.key === this.scaleKey).value
     }
   },
+  watch: {
+    start: 'syncGantt',
+    end: 'syncGantt',
+    scaleKey: 'syncGantt'
+  },
+  mounted() {
+    this.gantt = new VanillaGantt(this.$refs.gantt, this.createOptions())
+  },
+  beforeDestroy() {
+    if (this.gantt) this.gantt.destroy()
+  },
   methods: {
+    createOptions() {
+      return {
+        rows: this.rows,
+        tasks: this.tasks,
+        blocks: this.blocks,
+        links: this.links,
+        restRanges: this.restRanges,
+        start: this.start,
+        end: this.end,
+        now: '2026-03-30T12:00',
+        timeScale: this.timeScale,
+        rowHeight: 92,
+        leftWidth: 150,
+        lanes: this.lanes,
+        renderTask: this.renderTask
+      }
+    },
+    syncGantt() {
+      if (this.gantt) this.gantt.setOptions(this.createOptions())
+    },
     createRows() {
       return [
         {
@@ -261,6 +322,18 @@ export default {
     }
   }
 }
+
+function createScaleOptions() {
+  return [
+    { key: '1h', label: '1小时', value: { unit: 'hour', step: 1, pxPerUnit: 40, topUnit: 'day' } },
+    { key: '2h', label: '2小时', value: { unit: 'hour', step: 2, pxPerUnit: 64, topUnit: 'day' } },
+    { key: '4h', label: '4小时', value: { unit: 'hour', step: 4, pxPerUnit: 72, topUnit: 'day' } },
+    { key: 'day', label: '天', value: { unit: 'day', step: 1, pxPerUnit: 120, topUnit: 'day' } },
+    { key: 'week', label: '周', value: { unit: 'week', step: 1, pxPerUnit: 180, topUnit: 'month' } },
+    { key: 'month', label: '月', value: { unit: 'month', step: 1, pxPerUnit: 220, topUnit: 'year' } },
+    { key: 'year', label: '年', value: { unit: 'year', step: 1, pxPerUnit: 260, topUnit: 'year' } }
+  ]
+}
 </script>
 
 <style>
@@ -268,6 +341,84 @@ export default {
   height: 100%;
   display: flex;
   flex-direction: column;
+}
+
+.demo-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 52px;
+  padding: 10px 12px;
+  border: 1px solid #dfe8e8;
+  border-bottom: 0;
+  background: #fff;
+}
+
+.demo-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #556164;
+  font-size: 13px;
+}
+
+.demo-toolbar input,
+.demo-toolbar select {
+  height: 30px;
+  border: 1px solid #ccd8d8;
+  border-radius: 3px;
+  padding: 0 8px;
+  color: #344247;
+  background: #fff;
+}
+
+.legend {
+  display: grid;
+  grid-template-columns: 210px 230px;
+  gap: 22px;
+  padding: 10px 14px;
+  border: 1px solid #dfe8e8;
+  border-bottom: 0;
+  background: #fff;
+}
+
+.legend h3 {
+  margin-bottom: 8px;
+  color: #7a8588;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 24px;
+  color: #586367;
+  font-size: 13px;
+}
+
+.legend-swatch {
+  width: 20px;
+  height: 16px;
+  border: 2px solid transparent;
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  margin-left: 5px;
+  border-radius: 50%;
+}
+
+.legend-striped {
+  background-image: repeating-linear-gradient(
+    45deg,
+    #8f8f8f 0,
+    #8f8f8f 2px,
+    transparent 2px,
+    transparent 8px
+  );
 }
 
 .chart-wrap {

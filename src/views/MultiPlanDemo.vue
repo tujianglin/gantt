@@ -1,43 +1,34 @@
 <template>
   <section class="demo-view">
-    <DemoToolbar
-      :start="start"
-      :end="end"
-      :scale-key="scaleKey"
-      :scales="scaleOptions"
-      @update:start="start = $event"
-      @update:end="end = $event"
-      @update:scale-key="scaleKey = $event"
-    />
-    <div class="chart-wrap">
-      <VanillaGanttHost
-        :rows="rows"
-        :tasks="tasks"
-        :blocks="blocks"
-        :links="links"
-        :rest-ranges="restRanges"
-        :start="start"
-        :end="end"
-        now="2026-03-30T12:00"
-        :time-scale="timeScale"
-        :row-height="132"
-        :lanes="lanes"
-      />
+    <div class="demo-toolbar">
+      <label>
+        <span>开始</span>
+        <input v-model="start" type="datetime-local" />
+      </label>
+      <label>
+        <span>结束</span>
+        <input v-model="end" type="datetime-local" />
+      </label>
+      <label>
+        <span>刻度</span>
+        <select v-model="scaleKey">
+          <option v-for="scale in scaleOptions" :key="scale.key" :value="scale.key">
+            {{ scale.label }}
+          </option>
+        </select>
+      </label>
     </div>
+    <div ref="gantt" class="chart-wrap"></div>
   </section>
 </template>
 
 <script>
-import VanillaGanttHost from '../components/VanillaGanttHost.vue'
-import DemoToolbar from '../components/DemoToolbar.vue'
-import { scaleOptions } from '../demo/timeScales'
+import { VanillaGantt } from '../lib'
+
+const scaleOptions = createScaleOptions()
 
 export default {
   name: 'MultiPlanDemo',
-  components: {
-    VanillaGanttHost,
-    DemoToolbar
-  },
   data() {
     return {
       rows: [
@@ -72,7 +63,8 @@ export default {
       start: '2026-03-30T02:00',
       end: '2026-03-31T18:00',
       scaleKey: '2h',
-      scaleOptions
+      scaleOptions,
+      gantt: null
     }
   },
   computed: {
@@ -80,19 +72,46 @@ export default {
       return this.scaleOptions.find(scale => scale.key === this.scaleKey).value
     }
   },
+  watch: {
+    start: 'syncGantt',
+    end: 'syncGantt',
+    scaleKey: 'syncGantt'
+  },
+  mounted() {
+    this.gantt = new VanillaGantt(this.$refs.gantt, this.createOptions())
+  },
+  beforeDestroy() {
+    if (this.gantt) this.gantt.destroy()
+  },
   methods: {
+    createOptions() {
+      return {
+        rows: this.rows,
+        tasks: this.tasks,
+        blocks: this.blocks,
+        links: this.links,
+        restRanges: this.restRanges,
+        start: this.start,
+        end: this.end,
+        now: '2026-03-30T12:00',
+        timeScale: this.timeScale,
+        rowHeight: 132,
+        lanes: this.lanes
+      }
+    },
+    syncGantt() {
+      if (this.gantt) this.gantt.setOptions(this.createOptions())
+    },
     createTasks() {
       const plans = [
         this.plan('p1', 'unit-a', 'plan-1', '产品图号001', '144', '2026-03-30T06:00:00', '2026-03-30T12:00:00', { striped: true }),
         this.plan('p2', 'unit-a', 'plan-2', '产品图号002', '80', '2026-03-30T08:30:00', '2026-03-30T15:30:00', { status: 'planned' }),
         this.plan('p3', 'unit-a', 'plan-1', '产品图号003', '120', '2026-03-31T00:30:00', '2026-03-31T08:00:00'),
         this.plan('p4', 'unit-a', 'plan-2', '产品图号004', '96', '2026-03-31T03:00:00', '2026-03-31T12:30:00', { status: 'blue' }),
-
         this.plan('p5', 'unit-b', 'plan-1', '产品图号005', '144', '2026-03-30T05:00:00', '2026-03-30T11:45:00', { status: 'planned', striped: true }),
         this.plan('p6', 'unit-b', 'plan-2', '产品图号006', '100', '2026-03-30T13:00:00', '2026-03-30T22:30:00'),
         this.plan('p7', 'unit-b', 'plan-1', '产品图号007', '72', '2026-03-31T01:30:00', '2026-03-31T07:10:00', { status: 'selected' }),
         this.plan('p8', 'unit-b', 'plan-2', '产品图号008', '88', '2026-03-31T07:30:00', '2026-03-31T15:00:00', { status: 'warning' }),
-
         this.plan('p9', 'unit-c', 'plan-1', '产品图号009', '60', '2026-03-30T07:20:00', '2026-03-30T16:00:00'),
         this.plan('p10', 'unit-c', 'plan-2', '产品图号010', '120', '2026-03-30T10:40:00', '2026-03-30T18:20:00', { status: 'planned' }),
         this.plan('p11', 'unit-c', 'plan-1', '产品图号011', '144', '2026-03-31T02:40:00', '2026-03-31T11:20:00', { status: 'blue' })
@@ -101,16 +120,7 @@ export default {
       return plans.concat(plans.flatMap(plan => this.handlingTasks(plan)))
     },
     plan(id, rowId, lane, title, subtitle, start, end, extra = {}) {
-      return {
-        id,
-        rowId,
-        lane,
-        title,
-        subtitle,
-        start,
-        end,
-        ...extra
-      }
+      return { id, rowId, lane, title, subtitle, start, end, ...extra }
     },
     handlingTasks(plan) {
       const index = plan.lane.split('-')[1]
@@ -133,15 +143,21 @@ export default {
       return `${year}-${month}-${day}T${hour}:${minute}:00`
     },
     rest(id, start, end) {
-      return {
-        id,
-        start,
-        end,
-        fill: '#e4eaea',
-        opacity: 1
-      }
+      return { id, start, end, fill: '#e4eaea', opacity: 1 }
     }
   }
+}
+
+function createScaleOptions() {
+  return [
+    { key: '1h', label: '1小时', value: { unit: 'hour', step: 1, pxPerUnit: 40, topUnit: 'day' } },
+    { key: '2h', label: '2小时', value: { unit: 'hour', step: 2, pxPerUnit: 64, topUnit: 'day' } },
+    { key: '4h', label: '4小时', value: { unit: 'hour', step: 4, pxPerUnit: 72, topUnit: 'day' } },
+    { key: 'day', label: '天', value: { unit: 'day', step: 1, pxPerUnit: 120, topUnit: 'day' } },
+    { key: 'week', label: '周', value: { unit: 'week', step: 1, pxPerUnit: 180, topUnit: 'month' } },
+    { key: 'month', label: '月', value: { unit: 'month', step: 1, pxPerUnit: 220, topUnit: 'year' } },
+    { key: 'year', label: '年', value: { unit: 'year', step: 1, pxPerUnit: 260, topUnit: 'year' } }
+  ]
 }
 </script>
 
@@ -150,6 +166,35 @@ export default {
   height: 100%;
   display: flex;
   flex-direction: column;
+}
+
+.demo-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 52px;
+  padding: 10px 12px;
+  border: 1px solid #dfe8e8;
+  border-bottom: 0;
+  background: #fff;
+}
+
+.demo-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #556164;
+  font-size: 13px;
+}
+
+.demo-toolbar input,
+.demo-toolbar select {
+  height: 30px;
+  border: 1px solid #ccd8d8;
+  border-radius: 3px;
+  padding: 0 8px;
+  color: #344247;
+  background: #fff;
 }
 
 .chart-wrap {
