@@ -68,6 +68,14 @@ export interface GanttTimelineHeaderStyle {
   textAlign?: 'center' | 'end' | 'left' | 'right' | 'start'
 }
 
+export interface GanttTableHeaderStyle {
+  backgroundColor?: string
+  fontSize?: number
+  fontWeight?: string
+  color?: string
+  textAlign?: 'center' | 'end' | 'left' | 'right' | 'start'
+}
+
 export interface GanttTimelineScale {
   rowHeight?: number
   unit: GanttTimeUnit
@@ -76,11 +84,7 @@ export interface GanttTimelineScale {
   startOfWeek?: 'sunday' | 'monday'
   visible?: boolean
   style?: GanttTimelineHeaderStyle
-  format?: (date: {
-    dateIndex: number
-    startDate: Date
-    endDate: Date
-  }) => string
+  format?: (dateInfo: GanttTimelineDateInfo) => string
   customLayout?: GanttRenderer<GanttTimelineRenderContext>
 }
 
@@ -110,6 +114,7 @@ export interface GanttTableColumn {
   resizable?: boolean
   align?: 'center' | 'end' | 'left' | 'right' | 'start'
   headerAlign?: 'center' | 'end' | 'left' | 'right' | 'start'
+  headerStyle?: GanttTableHeaderStyle
   tree?: boolean
   className?: string
   valueGetter?: (context: GanttCellRenderContext) => unknown
@@ -123,6 +128,7 @@ export interface GanttTaskListTableOptions {
   minTableWidth?: number
   maxTableWidth?: number
   columnResizable?: boolean
+  headerStyle?: GanttTableHeaderStyle
   columns?: GanttTableColumn[]
   renderHeader?: GanttRenderer<GanttRenderContext>
   renderCell?: GanttRenderer<GanttCellRenderContext>
@@ -131,6 +137,7 @@ export interface GanttTaskListTableOptions {
 export interface GanttTimelineHeaderOptions {
   backgroundColor?: string
   colWidth?: number
+  style?: GanttTimelineHeaderStyle
   scales: GanttTimelineScale[]
   customLayout?: GanttRenderer<GanttTimelineRenderContext>
 }

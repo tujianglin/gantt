@@ -25,7 +25,12 @@
 <script>
 import { VanillaGantt } from '../lib'
 
+function formatMinuteLabel({ startDate }) {
+  return `${String(startDate.getHours()).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}`
+}
+
 const scaleOptions = [
+  { key: '15m', label: '15分钟', value: [{ unit: 'day', step: 1, rowHeight: 24 }, { unit: 'minute', step: 15, colWidth: 48, rowHeight: 24, format: formatMinuteLabel }] },
   { key: '1h', label: '1小时', value: [{ unit: 'day', step: 1, rowHeight: 24 }, { unit: 'hour', step: 1, colWidth: 40, rowHeight: 24 }] },
   { key: '2h', label: '2小时', value: [{ unit: 'day', step: 1, rowHeight: 24 }, { unit: 'hour', step: 2, colWidth: 64, rowHeight: 24 }] },
   { key: '4h', label: '4小时', value: [{ unit: 'day', step: 1, rowHeight: 24 }, { unit: 'hour', step: 4, colWidth: 72, rowHeight: 24 }] },
@@ -55,7 +60,7 @@ export default {
           ]
         },
         timelineHeader: {
-          scales: scaleOptions[1].value
+          scales: scaleOptions.find(scale => scale.key === '2h').value
         },
         dependency: {
           links: []

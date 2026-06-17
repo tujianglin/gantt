@@ -45,14 +45,22 @@
 <script>
 import { VanillaGantt } from '../lib'
 
+function formatMinuteLabel({ startDate }) {
+  return `${String(startDate.getHours()).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}`
+}
+
+const timelineMajorStyle = { backgroundColor: '#eaf3f8', color: '#2f4858', fontWeight: '700' }
+const timelineMinorStyle = { backgroundColor: '#f7fbfd', color: '#53666f' }
+
 const scaleOptions = [
-  { key: '1h', label: '1小时', value: [{ unit: 'day', step: 1, rowHeight: 24 }, { unit: 'hour', step: 1, colWidth: 40, rowHeight: 24 }] },
-  { key: '2h', label: '2小时', value: [{ unit: 'day', step: 1, rowHeight: 24 }, { unit: 'hour', step: 2, colWidth: 64, rowHeight: 24 }] },
-  { key: '4h', label: '4小时', value: [{ unit: 'day', step: 1, rowHeight: 24 }, { unit: 'hour', step: 4, colWidth: 72, rowHeight: 24 }] },
-  { key: 'day', label: '天', value: [{ unit: 'month', step: 1, rowHeight: 24 }, { unit: 'day', step: 1, colWidth: 120, rowHeight: 24 }] },
-  { key: 'week', label: '周', value: [{ unit: 'month', step: 1, rowHeight: 24 }, { unit: 'week', step: 1, colWidth: 180, rowHeight: 24 }] },
-  { key: 'month', label: '月', value: [{ unit: 'year', step: 1, rowHeight: 24 }, { unit: 'month', step: 1, colWidth: 220, rowHeight: 24 }] },
-  { key: 'year', label: '年', value: [{ unit: 'year', step: 1, colWidth: 260, rowHeight: 48 }] }
+  { key: '15m', label: '15分钟', value: [{ unit: 'day', step: 1, rowHeight: 24, style: timelineMajorStyle }, { unit: 'minute', step: 15, colWidth: 48, rowHeight: 24, format: formatMinuteLabel, style: timelineMinorStyle }] },
+  { key: '1h', label: '1小时', value: [{ unit: 'day', step: 1, rowHeight: 24, style: timelineMajorStyle }, { unit: 'hour', step: 1, colWidth: 40, rowHeight: 24, style: timelineMinorStyle }] },
+  { key: '2h', label: '2小时', value: [{ unit: 'day', step: 1, rowHeight: 24, style: timelineMajorStyle }, { unit: 'hour', step: 2, colWidth: 64, rowHeight: 24, style: timelineMinorStyle }] },
+  { key: '4h', label: '4小时', value: [{ unit: 'day', step: 1, rowHeight: 24, style: timelineMajorStyle }, { unit: 'hour', step: 4, colWidth: 72, rowHeight: 24, style: timelineMinorStyle }] },
+  { key: 'day', label: '天', value: [{ unit: 'month', step: 1, rowHeight: 24, style: timelineMajorStyle }, { unit: 'day', step: 1, colWidth: 120, rowHeight: 24, style: timelineMinorStyle }] },
+  { key: 'week', label: '周', value: [{ unit: 'month', step: 1, rowHeight: 24, style: timelineMajorStyle }, { unit: 'week', step: 1, colWidth: 180, rowHeight: 24, style: timelineMinorStyle }] },
+  { key: 'month', label: '月', value: [{ unit: 'year', step: 1, rowHeight: 24, style: timelineMajorStyle }, { unit: 'month', step: 1, colWidth: 220, rowHeight: 24, style: timelineMinorStyle }] },
+  { key: 'year', label: '年', value: [{ unit: 'year', step: 1, colWidth: 260, rowHeight: 48, style: timelineMajorStyle }] }
 ]
 
 function escapeHtml(value) {
@@ -87,21 +95,27 @@ export default {
         },
         taskListTable: {
           tableWidth: 'auto',
+          headerStyle: {
+            backgroundColor: '#eaf3f8',
+            color: '#2f4858'
+          },
           columns: [
             { field: 'name', title: '资源', width: 140, minWidth: 100, tree: true },
             { title: '工序', width: 78, minWidth: 64, valueGetter: this.getRecordStage },
             { title: '任务数', width: 70, minWidth: 60, align: 'right', headerAlign: 'right', valueGetter: this.getRecordTaskCount },
-            { title: '状态', width: 86, minWidth: 72, valueGetter: this.getRecordStatus, renderCell: this.renderRecordStatus }
+            { title: '状态', width: 86, minWidth: 72, headerStyle: { backgroundColor: '#dcecf4' }, valueGetter: this.getRecordStatus, renderCell: this.renderRecordStatus }
           ]
         },
         timelineHeader: {
-          scales: scaleOptions[1].value
+          backgroundColor: '#f7fbfd',
+          scales: scaleOptions.find(scale => scale.key === '2h').value
         },
         taskBar: {
           customLayout: this.renderTask,
           draggable: ({ task }) => !task.logistics && !task.parentAggregate,
           dragStep: 5 * 60 * 1000,
           tooltip: {
+            visible: true,
             customLayout: this.renderTaskTooltip
           },
           lanes: [

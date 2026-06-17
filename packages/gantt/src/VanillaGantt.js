@@ -2,6 +2,13 @@ import './vanilla-gantt.css'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
 const HOUR = 60 * 60 * 1000
+const DEFAULT_TASK_TOOLTIP = {
+  visible: true,
+  customLayout: null,
+  className: '',
+  offsetX: 12,
+  offsetY: 12
+}
 
 const DEFAULT_OPTIONS = {
   records: [],
@@ -17,6 +24,7 @@ const DEFAULT_OPTIONS = {
     minTableWidth: 120,
     maxTableWidth: 640,
     columnResizable: true,
+    headerStyle: null,
     columns: [
       { field: 'name', title: '工位', width: 170, tree: true }
     ],
@@ -26,6 +34,7 @@ const DEFAULT_OPTIONS = {
   timelineHeader: {
     backgroundColor: '#fff',
     colWidth: 56,
+    style: null,
     scales: [
       { unit: 'day', step: 1, rowHeight: 24 },
       { unit: 'hour', step: 2, rowHeight: 24, colWidth: 56 }
@@ -46,13 +55,7 @@ const DEFAULT_OPTIONS = {
     clip: true,
     draggable: true,
     dragStep: 60 * 1000,
-    tooltip: {
-      visible: true,
-      customLayout: null,
-      className: '',
-      offsetX: 12,
-      offsetY: 12
-    },
+    tooltip: false,
     onClick: null,
     onContextMenu: null,
     onMouseEnter: null,
@@ -153,6 +156,7 @@ export default class VanillaGantt {
     const header = el('div', 'vg-left-header')
     header.style.height = `${this.headerHeight}px`
     header.style.gridTemplateColumns = this.tableGridTemplateColumns
+    applyTableHeaderStyle(header, this.taskListTable.headerStyle)
     this.leftHeaderEl = header
     const custom = this.resolveContent(this.taskListTable.renderHeader, { gantt: this })
     if (custom) {
@@ -167,8 +171,13 @@ export default class VanillaGantt {
 
   renderTableHeaderCell(column, columnIndex) {
     const cell = el('div', `vg-table-header-cell${column.className ? ` ${column.className}` : ''}`)
+    const headerStyle = {
+      ...(this.taskListTable.headerStyle || {}),
+      ...(column.headerStyle || {})
+    }
+    applyTableHeaderStyle(cell, headerStyle)
     const content = el('div', 'vg-table-header-content')
-    content.style.justifyContent = alignToFlex(column.headerAlign || column.align || 'left')
+    content.style.justifyContent = alignToFlex(column.headerAlign || headerStyle.textAlign || column.align || 'left')
     const custom = this.resolveContent(column.renderHeader, {
       column,
       columnIndex,
@@ -300,7 +309,11 @@ export default class VanillaGantt {
     if (row.children) {
       const button = el('button', 'vg-row-toggle')
       button.type = 'button'
-      button.textContent = this.isExpanded(row) ? '⌄' : '›'
+      button.setAttribute('aria-label', this.isExpanded(row) ? '收起' : '展开')
+      button.setAttribute('aria-expanded', String(this.isExpanded(row)))
+      if (this.isExpanded(row)) {
+        button.classList.add('vg-row-toggle--expanded')
+      }
       name.append(button)
       name.addEventListener('click', () => this.toggleRow(row))
     }
@@ -402,6 +415,9 @@ export default class VanillaGantt {
       height: this.headerHeight,
       viewBox: `0 0 ${this.chartWidth} ${this.headerHeight}`
     })
+    if (this.timelineHeader.backgroundColor) {
+      svg.style.background = this.timelineHeader.backgroundColor
+    }
 
     let y = 0
     this.timelineUnitsByScale.forEach((units, scaleIndex) => {
@@ -434,11 +450,13 @@ export default class VanillaGantt {
       major: scaleIndex === 0,
       gantt: this
     })
+    const style = this.timelineCellStyle(scale)
     if (custom) {
+      applyTimelineStyleToContent(custom, this.timelineCustomCellStyle(scale))
       fo.append(custom)
     } else {
       const cell = el('div', `vg-timeline-cell${scaleIndex === 0 ? ' vg-timeline-cell--major' : ''}`)
-      applyTimelineStyle(cell, scale.style)
+      applyTimelineStyle(cell, style)
       cell.textContent = unit.label
       fo.append(cell)
     }
@@ -1259,13 +1277,13 @@ export default class VanillaGantt {
           dateIndex,
           key: `${unit}-${cursor.toISOString()}`,
           title: this.formatUnitLabel(cursor, unit),
-          label: this.formatTimelineLabel(scale, unitStart, unitEnd, dateIndex),
           startDate: new Date(unitStart),
           endDate: new Date(unitEnd),
           days: Math.max(1, Math.ceil((unitEnd - unitStart) / (24 * HOUR))),
           x: this.timeToX(unitStart),
           width: Math.max(1, this.timeToX(unitEnd) - this.timeToX(unitStart))
         }
+        info.label = this.formatTimelineLabel(scale, info)
         units.push(info)
         dateIndex += 1
       }
@@ -1274,15 +1292,11 @@ export default class VanillaGantt {
     return units
   }
 
-  formatTimelineLabel(scale, startTime, endTime, dateIndex) {
+  formatTimelineLabel(scale, dateInfo) {
     if (typeof scale.format === 'function') {
-      return scale.format({
-        dateIndex,
-        startDate: new Date(startTime),
-        endDate: new Date(endTime)
-      })
+      return scale.format(dateInfo)
     }
-    return this.formatUnitLabel(new Date(startTime), scale.unit)
+    return this.formatUnitLabel(dateInfo.startDate, scale.unit)
   }
 
   floorDate(date, unit, startOfWeek = 'monday') {
@@ -1336,6 +1350,24 @@ export default class VanillaGantt {
 
   scaleRowHeight(scale) {
     return scale.rowHeight || this.options.headerRowHeight
+  }
+
+  timelineCellStyle(scale) {
+    const style = {
+      ...(this.timelineHeader.style || {}),
+      ...(scale.style || {})
+    }
+    if (!style.backgroundColor && this.timelineHeader.backgroundColor) {
+      style.backgroundColor = this.timelineHeader.backgroundColor
+    }
+    return style
+  }
+
+  timelineCustomCellStyle(scale) {
+    return {
+      ...(this.timelineHeader.style || {}),
+      ...(scale.style || {})
+    }
   }
 
   getDescendantRecordKeys(row) {
@@ -1393,9 +1425,12 @@ export default class VanillaGantt {
 
   get taskTooltip() {
     const tooltip = this.taskBar.tooltip
-    if (tooltip === false) return null
-    if (tooltip === true || tooltip === undefined || tooltip === null) return DEFAULT_OPTIONS.taskBar.tooltip
-    return tooltip
+    if (tooltip === false || tooltip === undefined || tooltip === null) return null
+    if (tooltip === true) return DEFAULT_TASK_TOOLTIP
+    return {
+      ...DEFAULT_TASK_TOOLTIP,
+      ...tooltip
+    }
   }
 
   get dependency() {
@@ -1807,12 +1842,28 @@ function mergeNestedOption(base, patch) {
   return patch
 }
 
+function applyTableHeaderStyle(node, style = {}) {
+  if (!style) return
+  if (style.backgroundColor) node.style.background = style.backgroundColor
+  if (style.color) node.style.color = style.color
+  if (style.fontSize) node.style.fontSize = `${style.fontSize}px`
+  if (style.fontWeight) node.style.fontWeight = style.fontWeight
+}
+
 function applyTimelineStyle(node, style = {}) {
   if (style.backgroundColor) node.style.background = style.backgroundColor
   if (style.color) node.style.color = style.color
   if (style.fontSize) node.style.fontSize = `${style.fontSize}px`
   if (style.fontWeight) node.style.fontWeight = style.fontWeight
   if (style.textAlign) node.style.justifyContent = alignToFlex(style.textAlign)
+}
+
+function applyTimelineStyleToContent(content, style = {}) {
+  if (!style || !Object.keys(style).length) return
+  const target = content.nodeType === 11 ? content.firstElementChild : content
+  if (target instanceof HTMLElement) {
+    applyTimelineStyle(target, style)
+  }
 }
 
 function alignToFlex(value) {

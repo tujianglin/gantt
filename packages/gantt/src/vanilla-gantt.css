@@ -131,13 +131,27 @@
   align-items: center;
   justify-content: center;
   flex: 0 0 18px;
+  box-sizing: border-box;
   padding: 0;
   border: 0;
   background: transparent;
   color: #819093;
-  font-size: 14px;
-  line-height: 1;
   cursor: pointer;
+}
+
+.vg-row-toggle::before {
+  content: '';
+  display: block;
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid currentColor;
+  transform-origin: center;
+}
+
+.vg-row-toggle--expanded::before {
+  transform: rotate(90deg);
 }
 
 .vg-row-load {
