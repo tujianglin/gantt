@@ -11,7 +11,7 @@
     />
     <WorkOrderLegend />
     <div class="chart-wrap">
-      <GanttChart
+      <VanillaGanttHost
         :rows="rows"
         :tasks="tasks"
         :blocks="blocks"
@@ -24,23 +24,22 @@
         :row-height="92"
         :initial-left-width="150"
         :lanes="lanes"
-        :task-component="taskComponent"
+        :render-task="renderTask"
       />
     </div>
   </section>
 </template>
 
 <script>
-import GanttChart from '../components/GanttChart.vue'
+import VanillaGanttHost from '../components/VanillaGanttHost.vue'
 import DemoToolbar from '../components/DemoToolbar.vue'
 import WorkOrderLegend from '../components/demo/WorkOrderLegend.vue'
-import WorkOrderTask from '../components/demo/WorkOrderTask.vue'
 import { scaleOptions } from '../demo/timeScales'
 
 export default {
   name: 'WorkOrderStatusDemo',
   components: {
-    GanttChart,
+    VanillaGanttHost,
     DemoToolbar,
     WorkOrderLegend
   },
@@ -77,8 +76,7 @@ export default {
       start: '2026-03-30T02:00',
       end: '2026-04-01T08:00',
       scaleKey: '2h',
-      scaleOptions,
-      taskComponent: WorkOrderTask
+      scaleOptions
     }
   },
   computed: {
@@ -146,6 +144,50 @@ export default {
         this.block('shift-heat', 'heat', '2026-03-30T02:00:00', '2026-04-01T08:00:00', '#ffe2a8', 0.82, 8, 32),
         this.block('shift-outside', 'outside', '2026-03-30T02:00:00', '2026-04-01T08:00:00', '#cfe1ff', 0.82, 8, 32)
       ]
+    },
+    renderTask({ task }) {
+      const node = document.createElement('div')
+      node.className = [
+        'work-task',
+        `work-task--${task.status || 'normal'}`,
+        `work-task--${task.workStatus || 'progress-normal'}`,
+        task.logistics ? 'work-task--logistics' : '',
+        task.completed ? 'work-task--completed' : '',
+        task.predecessorIncomplete ? 'work-task--predecessor' : '',
+        task.replan === 'before' ? 'work-task--before' : '',
+        task.replan === 'after' ? 'work-task--after' : '',
+        task.parentAggregate ? 'work-task--aggregate' : ''
+      ].filter(Boolean).join(' ')
+
+      if (task.logistics) return node
+
+      const dot = document.createElement('span')
+      dot.className = 'work-task-dot'
+      const title = document.createElement('div')
+      title.className = 'work-task-title'
+      title.textContent = task.title
+      const meta = document.createElement('div')
+      meta.className = 'work-task-meta'
+      meta.textContent = task.subtitle || ''
+
+      if (task.progress !== undefined) {
+        const progressText = document.createElement('span')
+        progressText.textContent = `（${task.progress}%）`
+        meta.append(progressText)
+      }
+
+      node.append(dot, title, meta)
+
+      if (task.progress !== undefined) {
+        const progress = document.createElement('div')
+        progress.className = 'work-task-progress'
+        const bar = document.createElement('i')
+        bar.style.width = `${task.progress}%`
+        progress.append(bar)
+        node.append(progress)
+      }
+
+      return node
     },
     plan(id, rowId, title, subtitle, start, end, extra = {}) {
       return {
@@ -221,7 +263,7 @@ export default {
 }
 </script>
 
-<style scoped>
+<style>
 .demo-view {
   height: 100%;
   display: flex;
@@ -231,5 +273,161 @@ export default {
 .chart-wrap {
   min-height: 0;
   flex: 1;
+}
+
+.work-task {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  padding: 8px 12px;
+  border: 1px solid rgba(35, 101, 94, 0.12);
+  background: #a8eee5;
+  color: #27413e;
+  overflow: hidden;
+}
+
+.work-task--planned {
+  background: #fff0b5;
+}
+
+.work-task--blue {
+  background: #bfe7ff;
+}
+
+.work-task--pink {
+  background: #ffd9e8;
+}
+
+.work-task--purple {
+  background: #ecd9ff;
+}
+
+.work-task--predecessor::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  background: #ffe8bd;
+}
+
+.work-task--completed {
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(41, 164, 154, 0.24) 0,
+    rgba(41, 164, 154, 0.24) 2px,
+    transparent 2px,
+    transparent 8px
+  );
+}
+
+.work-task--before {
+  border: 2px solid #40c51b;
+}
+
+.work-task--after {
+  border: 2px solid #ff4b55;
+}
+
+.work-task-title {
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.work-task-meta {
+  position: relative;
+  z-index: 1;
+  margin-top: 7px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  line-height: 1.15;
+}
+
+.work-task-meta span {
+  color: #41c51b;
+}
+
+.work-task-dot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #40c51b;
+}
+
+.work-task--not-started .work-task-dot {
+  background: #d8d8d8;
+}
+
+.work-task--slight-delay .work-task-dot {
+  background: #ffa51d;
+}
+
+.work-task--severe-delay .work-task-dot {
+  background: #ff4756;
+}
+
+.work-task-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 6px;
+  background: #d9d9d9;
+}
+
+.work-task-progress i {
+  display: block;
+  height: 100%;
+  background: #40c51b;
+}
+
+.work-task--logistics {
+  padding: 0;
+  border: 0;
+  font-size: 0;
+}
+
+.work-task--load-done {
+  background: #d9d9d9;
+}
+
+.work-task--load-running {
+  background: #2f9bff;
+}
+
+.work-task--load-waiting {
+  background: #bfe7ff;
+}
+
+.work-task--unload-done {
+  background: #969696;
+}
+
+.work-task--unload-running {
+  background: #9652e6;
+}
+
+.work-task--unload-waiting {
+  background: #eadbff;
+}
+
+.work-task--aggregate .work-task-title {
+  font-size: 14px;
+}
+
+.work-task--aggregate .work-task-meta {
+  font-size: 13px;
 }
 </style>

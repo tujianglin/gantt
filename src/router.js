@@ -4,6 +4,7 @@ import BasicDemo from './views/BasicDemo.vue'
 import CustomRenderDemo from './views/CustomRenderDemo.vue'
 import MultiPlanDemo from './views/MultiPlanDemo.vue'
 import WorkOrderStatusDemo from './views/WorkOrderStatusDemo.vue'
+import VanillaGanttDemo from './views/VanillaGanttDemo.vue'
 
 Vue.use(Router)
 
@@ -44,6 +45,14 @@ export default new Router({
       component: WorkOrderStatusDemo,
       meta: {
         title: '工单状态图例'
+      }
+    },
+    {
+      path: '/vanilla',
+      name: 'vanilla',
+      component: VanillaGanttDemo,
+      meta: {
+        title: 'JS 通用组件'
       }
     }
   ]

@@ -10,7 +10,7 @@
       @update:scale-key="scaleKey = $event"
     />
     <div class="chart-wrap">
-      <GanttChart
+      <VanillaGanttHost
         :rows="rows"
         :tasks="tasks"
         :blocks="blocks"
@@ -28,14 +28,14 @@
 </template>
 
 <script>
-import GanttChart from '../components/GanttChart.vue'
+import VanillaGanttHost from '../components/VanillaGanttHost.vue'
 import DemoToolbar from '../components/DemoToolbar.vue'
 import { scaleOptions } from '../demo/timeScales'
 
 export default {
   name: 'MultiPlanDemo',
   components: {
-    GanttChart,
+    VanillaGanttHost,
     DemoToolbar
   },
   data() {
