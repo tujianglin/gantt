@@ -111,8 +111,13 @@ export default {
           ]
         },
         dependency: {
+          showLinks: false,
+          highlightConnected: true,
+          dimOpacity: 0.18,
           links: [
-            { id: 'delay-link', type: 'finish_to_start', linkedFromTaskKey: 'wo-5', linkedToTaskKey: 'wo-6', color: '#40c51b', dashed: true }
+            { id: 'heat-flow-1', type: 'finish_to_start', from: 'wo-1', to: ['wo-2', 'wo-17'], color: '#168dff' },
+            { id: 'heat-flow-2', type: 'finish_to_start', from: 'wo-5', to: ['wo-6', 'wo-18'], color: '#168dff' },
+            { id: 'outside-flow', type: 'finish_to_start', from: 'wo-13', to: 'wo-14', color: '#40c51b', dashed: true }
           ]
         },
         grid: {
@@ -211,6 +216,24 @@ export default {
                 ]
               }
             ]
+          },
+          {
+            id: 'single-plan-a',
+            name: '计划任务A',
+            stage: '计划',
+            height: 92,
+            tasks: [
+              { id: 'wo-17', lane: 'plan', title: '补充计划001', subtitle: '96', startDate: '2026-03-30T15:30:00', endDate: '2026-03-31T00:30:00', status: 'planned', progress: 35, workStatus: 'progress-normal' }
+            ]
+          },
+          {
+            id: 'single-plan-b',
+            name: '计划任务B',
+            stage: '计划',
+            height: 92,
+            tasks: [
+              { id: 'wo-18', lane: 'plan', title: '补充计划002', subtitle: '120', startDate: '2026-03-31T12:30:00', endDate: '2026-04-01T06:00:00', status: 'blue', workStatus: 'slight-delay' }
+            ]
           }
         ]
       },
@@ -261,6 +284,7 @@ export default {
       if (this.gantt) this.gantt.setOptions(this.options)
     },
     getRecordStage({ row }) {
+      if (row.stage) return row.stage
       if (row.type === 'group') return row.name || ''
       if (String(row.id).startsWith('outside')) return '外协'
       if (String(row.id).startsWith('heat')) return '热处理'

@@ -68,7 +68,10 @@ const DEFAULT_OPTIONS = {
   },
   dependency: {
     links: [],
-    linkLineStyle: null
+    linkLineStyle: null,
+    showLinks: false,
+    highlightConnected: false,
+    dimOpacity: 0.18
   },
   grid: {
     backgroundColor: '#f7fbfb',
@@ -95,6 +98,8 @@ export default class VanillaGantt {
     this.scrollLeft = 0
     this.disposers = []
     this.activeDrag = null
+    this.activeLinkTaskKey = null
+    this.activeLinkGroupKey = null
     this.suppressClickUntil = 0
     this.suppressClickTaskKey = null
     this.seedExpandedRows(this.options.records)
@@ -455,6 +460,11 @@ export default class VanillaGantt {
 
     svg.append(this.renderDefs())
     this.appendGrid(svg)
+    const onCanvasClick = () => {
+      if (this.clearActiveLinkGroup()) this.render()
+    }
+    svg.addEventListener('click', onCanvasClick)
+    this.disposers.push(() => svg.removeEventListener('click', onCanvasClick))
     stage.append(svg)
     scroll.append(stage)
 
@@ -560,12 +570,12 @@ export default class VanillaGantt {
       svg.append(rect)
     })
 
-    this.visibleLinks.forEach(link => {
-      this.appendLink(svg, link)
-    })
-
     this.renderTasks.forEach(task => {
       svg.append(this.renderTask(task))
+    })
+
+    this.visibleLinks.forEach(link => {
+      this.appendLink(svg, link)
     })
   }
 
@@ -590,40 +600,63 @@ export default class VanillaGantt {
   }
 
   appendLink(svg, link) {
-    const from = this.taskLayoutByKey[firstKey(link.linkedFromTaskKey)]
-    const to = this.taskLayoutByKey[firstKey(link.linkedToTaskKey)]
+    const from = this.taskLayoutByKey[link.from]
+    const to = this.taskLayoutByKey[link.to]
     if (!from || !to) return
 
-    const points = this.linkPoints(link.type, from, to)
+    const route = this.linkRoute(link.type, from, to)
     const style = {
       ...(this.dependency.linkLineStyle || {}),
       ...(link.linkLineStyle || {})
     }
-    const line = this.line(points.x1, points.y1, points.x2, points.y2, style.lineColor || link.color || '#43c51a')
-    this.applyLineStyle(line, { lineWidth: 2, ...style })
-    if (link.dashed) line.setAttribute('stroke-dasharray', '5 4')
-    svg.append(line)
-    svg.append(this.circle(points.x1, points.y1, 5, style.lineColor || link.color || '#43c51a'))
-    svg.append(this.circle(points.x2, points.y2, 5, style.lineColor || link.color || '#43c51a'))
+    const color = style.lineColor || link.color || '#168dff'
+    const path = this.path(route.d, color)
+    attrs(path, {
+      fill: 'none',
+      'stroke-linejoin': 'round',
+      'stroke-linecap': 'round'
+    })
+    this.applyLineStyle(path, { lineWidth: 2, ...style })
+    if (link.dashed) path.setAttribute('stroke-dasharray', '6 4')
+    svg.append(path)
+    svg.append(this.circle(route.start.x, route.start.y, 4, color))
+    svg.append(this.arrow(route.end.x, route.end.y, route.direction, color))
   }
 
-  linkPoints(type, from, to) {
+  linkRoute(type, from, to) {
     const fromStart = from.x
     const fromEnd = from.x + from.width
     const toStart = to.x
     const toEnd = to.x + to.width
     const normalizedType = type || 'finish_to_start'
+    let start
+    let end
 
     if (normalizedType === 'start_to_start') {
-      return { x1: fromStart, y1: from.centerY, x2: toStart, y2: to.centerY }
+      start = { x: fromStart, y: from.centerY }
+      end = { x: toStart, y: to.centerY }
+    } else if (normalizedType === 'finish_to_finish') {
+      start = { x: fromEnd, y: from.centerY }
+      end = { x: toEnd, y: to.centerY }
+    } else if (normalizedType === 'start_to_finish') {
+      start = { x: fromStart, y: from.centerY }
+      end = { x: toEnd, y: to.centerY }
+    } else {
+      start = { x: fromEnd, y: from.centerY }
+      end = { x: toStart, y: to.centerY }
     }
-    if (normalizedType === 'finish_to_finish') {
-      return { x1: fromEnd, y1: from.centerY, x2: toEnd, y2: to.centerY }
+
+    const direction = end.x >= start.x ? 1 : -1
+    const gap = Math.abs(end.x - start.x)
+    const elbow = direction > 0
+      ? start.x + Math.max(20, gap / 2)
+      : start.x + 28
+    return {
+      start,
+      end,
+      direction,
+      d: `M ${start.x} ${start.y} H ${elbow} V ${end.y} H ${end.x}`
     }
-    if (normalizedType === 'start_to_finish') {
-      return { x1: fromStart, y1: from.centerY, x2: toEnd, y2: to.centerY }
-    }
-    return { x1: fromEnd, y1: from.centerY, x2: toStart, y2: to.centerY }
   }
 
   renderTask(task) {
@@ -647,6 +680,10 @@ export default class VanillaGantt {
     })
     const custom = this.resolveContent(this.taskBar.customLayout, payload)
     fo.append(custom || this.renderDefaultTask(task))
+    if (this.isTaskDimmed(task)) {
+      fo.classList.add('vg-task-fo--dimmed')
+      fo.style.opacity = String(this.dependency.dimOpacity === undefined ? 0.18 : this.dependency.dimOpacity)
+    }
     this.bindTaskInteractions(fo, task)
     return fo
   }
@@ -663,7 +700,10 @@ export default class VanillaGantt {
         event.stopPropagation()
         return
       }
+      const shouldRender = this.activateTaskLinkGroup(task)
       this.callTaskCallback('onClick', task, event)
+      event.stopPropagation()
+      if (shouldRender) this.render()
     }
     const onContextMenu = event => {
       if (typeof this.taskBar.onContextMenu !== 'function') return
@@ -1032,6 +1072,21 @@ export default class VanillaGantt {
     return circle
   }
 
+  path(d, stroke) {
+    const path = svgEl('path', 'vg-link-path')
+    attrs(path, { d, stroke })
+    return path
+  }
+
+  arrow(x, y, direction, fill) {
+    const arrow = svgEl('path', 'vg-link-arrow')
+    const d = direction >= 0
+      ? `M ${x} ${y} l -8 -4 v 8 Z`
+      : `M ${x} ${y} l 8 -4 v 8 Z`
+    attrs(arrow, { d, fill })
+    return arrow
+  }
+
   applyLineStyle(line, style = {}) {
     if (style.lineWidth !== undefined) line.setAttribute('stroke-width', style.lineWidth)
     if (style.lineDash) line.setAttribute('stroke-dasharray', style.lineDash.join(' '))
@@ -1121,6 +1176,31 @@ export default class VanillaGantt {
       endDate: new Date(toTime(this.taskEnd(task))),
       ganttInstance: this
     })
+  }
+
+  isTaskDimmed(task) {
+    if (!this.dependency.highlightConnected) return false
+    const key = this.taskKey(task)
+    if (!key) return false
+    if (!this.visibleLinks.length) return false
+    return !this.connectedTaskKeys[key]
+  }
+
+  activateTaskLinkGroup(task) {
+    const taskKey = this.taskKey(task)
+    const groupKey = this.firstLinkGroupKeyByTask(taskKey)
+    const nextTaskKey = groupKey ? taskKey : null
+    const changed = this.activeLinkTaskKey !== nextTaskKey || this.activeLinkGroupKey !== groupKey
+    this.activeLinkTaskKey = nextTaskKey
+    this.activeLinkGroupKey = groupKey
+    return changed
+  }
+
+  clearActiveLinkGroup() {
+    if (!this.activeLinkTaskKey && !this.activeLinkGroupKey) return false
+    this.activeLinkTaskKey = null
+    this.activeLinkGroupKey = null
+    return true
   }
 
   timeToX(value) {
@@ -1613,10 +1693,53 @@ export default class VanillaGantt {
   }
 
   get visibleLinks() {
-    return (this.dependency.links || []).filter(link => {
-      return this.taskLayoutByKey[firstKey(link.linkedFromTaskKey)] &&
-        this.taskLayoutByKey[firstKey(link.linkedToTaskKey)]
+    return this.activeNormalizedLinks.filter(link => {
+      return this.taskLayoutByKey[link.from] && this.taskLayoutByKey[link.to]
     })
+  }
+
+  get activeNormalizedLinks() {
+    if (this.activeLinkGroupKey) {
+      return this.normalizedLinks.filter(link => link.__groupKey === this.activeLinkGroupKey)
+    }
+    return this.dependency.showLinks === true ? this.normalizedLinks : []
+  }
+
+  get normalizedLinks() {
+    const links = []
+    ;(this.dependency.links || []).forEach((link, linkIndex) => {
+      const fromKeys = toKeyList(link.from)
+      const toKeys = toKeyList(link.to)
+      const groupKey = link.id === undefined || link.id === null
+        ? `link-${linkIndex}`
+        : String(link.id)
+      fromKeys.forEach(from => {
+        toKeys.forEach(to => {
+          if (from === undefined || from === null || to === undefined || to === null) return
+          links.push({
+            ...link,
+            from,
+            to,
+            __groupKey: groupKey
+          })
+        })
+      })
+    })
+    return links
+  }
+
+  firstLinkGroupKeyByTask(taskKey) {
+    if (taskKey === undefined || taskKey === null) return null
+    const link = this.normalizedLinks.find(item => item.from === taskKey || item.to === taskKey)
+    return link ? link.__groupKey : null
+  }
+
+  get connectedTaskKeys() {
+    return this.visibleLinks.reduce((map, link) => {
+      map[link.from] = true
+      map[link.to] = true
+      return map
+    }, {})
   }
 
   get taskMinWidth() {
@@ -1698,8 +1821,10 @@ function alignToFlex(value) {
   return 'center'
 }
 
-function firstKey(value) {
-  return Array.isArray(value) ? value[0] : value
+function toKeyList(value) {
+  if (Array.isArray(value)) return value
+  if (value === undefined || value === null) return []
+  return [value]
 }
 
 function el(tag, className = '') {

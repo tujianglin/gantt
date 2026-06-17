@@ -89,8 +89,8 @@ export default {
         },
         dependency: {
           links: [
-            { id: 'l1', type: 'finish_to_start', linkedFromTaskKey: 't7', linkedToTaskKey: 't8', color: '#43c51a' },
-            { id: 'l2', type: 'finish_to_start', linkedFromTaskKey: 't5', linkedToTaskKey: 't4', color: '#43c51a', dashed: true }
+            { id: 'l1', type: 'finish_to_start', from: 't7', to: 't8', color: '#43c51a' },
+            { id: 'l2', type: 'finish_to_start', from: 't5', to: 't4', color: '#43c51a', dashed: true }
           ]
         },
         grid: {
@@ -311,11 +311,16 @@ export default {
 .custom-row-toggle {
   width: 18px;
   height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 18px;
+  padding: 0;
   border: 0;
   background: transparent;
   color: #168f87;
-  font-size: 18px;
-  line-height: 18px;
+  font-size: 14px;
+  line-height: 1;
   cursor: pointer;
 }
 

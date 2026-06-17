@@ -75,6 +75,13 @@ const gantt = new VanillaGantt(document.querySelector('#gantt'), {
     onDragEnd: ({ sourceTask, startDate, endDate }) => {
       console.log('task dragged', sourceTask, startDate, endDate)
     }
+  },
+  dependency: {
+    showLinks: false,
+    highlightConnected: true,
+    links: [
+      { id: 'flow-1', from: 'task-1', to: ['task-2', 'task-3'], color: '#168dff' }
+    ]
   }
 })
 
@@ -93,6 +100,7 @@ gantt.destroy()
 Custom renderers can return an HTML template string, a `Node`, or `{ rootContainer }`.
 For a custom tree cell, put `data-vg-toggle` on the toggle element and the gantt instance will bind expand/collapse automatically.
 For controls inside a custom task template, put `data-vg-no-drag` on the element to prevent it from starting task dragging.
+Dependency lines use `from` and `to`; `to` can be an array. `dependency.showLinks` defaults to `false`, so links are hidden until a task is clicked, and only one link group is shown at a time.
 
 ## Build
 

@@ -65,8 +65,8 @@ export default {
         },
         dependency: {
           links: [
-            { id: 'l1', type: 'finish_to_start', linkedFromTaskKey: 't7', linkedToTaskKey: 't8', color: '#43c51a' },
-            { id: 'l2', type: 'finish_to_start', linkedFromTaskKey: 't5', linkedToTaskKey: 't4', color: '#43c51a', dashed: true }
+            { id: 'l1', type: 'finish_to_start', from: 't7', to: 't8', color: '#43c51a' },
+            { id: 'l2', type: 'finish_to_start', from: 't5', to: 't4', color: '#43c51a', dashed: true }
           ]
         },
         grid: {

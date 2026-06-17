@@ -178,8 +178,8 @@ export type GanttDependencyType =
 export interface GanttTaskLink {
   id?: string | number
   type?: GanttDependencyType
-  linkedFromTaskKey: string | number | Array<string | number>
-  linkedToTaskKey: string | number | Array<string | number>
+  from: string | number | Array<string | number>
+  to: string | number | Array<string | number>
   linkLineStyle?: GanttLineStyle
   color?: string
   dashed?: boolean
@@ -189,6 +189,9 @@ export interface GanttTaskLink {
 export interface GanttDependencyOptions {
   links?: GanttTaskLink[]
   linkLineStyle?: GanttLineStyle
+  showLinks?: boolean
+  highlightConnected?: boolean
+  dimOpacity?: number
   linkCreatable?: boolean
   linkSelectable?: boolean
   linkDeletable?: boolean

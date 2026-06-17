@@ -127,11 +127,16 @@
 .vg-row-toggle {
   width: 18px;
   height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 18px;
+  padding: 0;
   border: 0;
   background: transparent;
   color: #819093;
-  font-size: 18px;
-  line-height: 18px;
+  font-size: 14px;
+  line-height: 1;
   cursor: pointer;
 }
 
@@ -240,6 +245,7 @@
 
 .vg-task-fo {
   user-select: none;
+  transition: opacity 0.16s ease;
 }
 
 .vg-task-fo--draggable {
@@ -249,6 +255,15 @@
 .vg-task-fo--dragging {
   cursor: grabbing;
   opacity: 0.86;
+}
+
+.vg-task-fo--dimmed {
+  pointer-events: auto;
+}
+
+.vg-link-path,
+.vg-link-arrow {
+  pointer-events: none;
 }
 
 .vg-task--planned {
