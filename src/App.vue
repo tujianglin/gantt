@@ -2,11 +2,12 @@
   <div id="app">
     <aside class="app-nav">
       <div class="brand">SVG Gantt</div>
-      <router-link to="/basic">基础排产</router-link>
-      <router-link to="/multi-plan">多计划泳道</router-link>
+      <router-link to="/basic">基础示例</router-link>
+      <router-link to="/table-columns">表格列</router-link>
+      <router-link to="/timeline">时间轴</router-link>
+      <router-link to="/task-interaction">任务交互</router-link>
       <router-link to="/work-order-status">工单状态图例</router-link>
-      <router-link to="/vanilla">JS 通用组件</router-link>
-      <router-link to="/custom">自定义渲染</router-link>
+      <router-link to="/options">配置文档</router-link>
     </aside>
     <main class="app-main">
       <router-view />

@@ -1,10 +1,11 @@
 import Vue from 'vue'
 import Router from 'vue-router'
 import BasicDemo from './views/BasicDemo.vue'
-import CustomRenderDemo from './views/CustomRenderDemo.vue'
-import MultiPlanDemo from './views/MultiPlanDemo.vue'
+import TableColumnsDemo from './views/TableColumnsDemo.vue'
+import TimelineDemo from './views/TimelineDemo.vue'
+import TaskInteractionDemo from './views/TaskInteractionDemo.vue'
 import WorkOrderStatusDemo from './views/WorkOrderStatusDemo.vue'
-import VanillaGanttDemo from './views/VanillaGanttDemo.vue'
+import OptionsDocs from './views/OptionsDocs.vue'
 
 Vue.use(Router)
 
@@ -20,23 +21,31 @@ export default new Router({
       name: 'basic',
       component: BasicDemo,
       meta: {
-        title: '基础排产'
+        title: '基础示例'
       }
     },
     {
-      path: '/custom',
-      name: 'custom',
-      component: CustomRenderDemo,
+      path: '/table-columns',
+      name: 'table-columns',
+      component: TableColumnsDemo,
       meta: {
-        title: '自定义渲染'
+        title: '表格列'
       }
     },
     {
-      path: '/multi-plan',
-      name: 'multi-plan',
-      component: MultiPlanDemo,
+      path: '/timeline',
+      name: 'timeline',
+      component: TimelineDemo,
       meta: {
-        title: '多计划泳道'
+        title: '时间轴'
+      }
+    },
+    {
+      path: '/task-interaction',
+      name: 'task-interaction',
+      component: TaskInteractionDemo,
+      meta: {
+        title: '任务交互'
       }
     },
     {
@@ -48,12 +57,16 @@ export default new Router({
       }
     },
     {
-      path: '/vanilla',
-      name: 'vanilla',
-      component: VanillaGanttDemo,
+      path: '/options',
+      name: 'options',
+      component: OptionsDocs,
       meta: {
-        title: 'JS 通用组件'
+        title: '配置文档'
       }
+    },
+    {
+      path: '*',
+      redirect: '/basic'
     }
   ]
 })
