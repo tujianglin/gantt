@@ -4,36 +4,65 @@ const SVG_NS = 'http://www.w3.org/2000/svg'
 const HOUR = 60 * 60 * 1000
 
 const DEFAULT_OPTIONS = {
-  rows: [],
-  tasks: [],
-  blocks: [],
-  links: [],
-  restRanges: [],
-  start: '',
-  end: '',
-  now: '',
+  records: [],
+  recordKeyField: 'id',
+  taskKeyField: 'id',
+  minDate: '',
+  maxDate: '',
   rowHeight: 78,
   taskHeight: 36,
-  leftWidth: 170,
-  minLeftWidth: 120,
-  maxLeftWidth: 360,
-  dayHeaderHeight: 24,
-  hourHeaderHeight: 24,
-  timeScale: {
-    unit: 'hour',
-    step: 2,
-    pxPerUnit: 56,
-    topUnit: 'day'
+  headerRowHeight: 24,
+  taskListTable: {
+    tableWidth: 'auto',
+    minTableWidth: 120,
+    maxTableWidth: 640,
+    columnResizable: true,
+    columns: [
+      { field: 'name', title: '工位', width: 170, tree: true }
+    ],
+    renderHeader: null,
+    renderCell: null
   },
-  lanes: [
-    { key: 'plan', offset: 8, height: 36 },
-    { key: 'load', offset: 52, height: 6 },
-    { key: 'unload', offset: 66, height: 6 }
-  ],
-  renderTableHeader: null,
-  renderRow: null,
-  renderTask: null,
-  renderTimeline: null,
+  timelineHeader: {
+    backgroundColor: '#fff',
+    colWidth: 56,
+    scales: [
+      { unit: 'day', step: 1, rowHeight: 24 },
+      { unit: 'hour', step: 2, rowHeight: 24, colWidth: 56 }
+    ]
+  },
+  taskBar: {
+    tasksField: 'tasks',
+    startDateField: 'startDate',
+    endDateField: 'endDate',
+    progressField: 'progress',
+    laneField: 'lane',
+    statusField: 'status',
+    labelText: 'title',
+    subLabelText: 'subtitle',
+    barStyle: null,
+    projectStyle: null,
+    customLayout: null,
+    clip: true,
+    lanes: [
+      { key: 'plan', offset: 8, height: 36 },
+      { key: 'load', offset: 52, height: 6 },
+      { key: 'unload', offset: 66, height: 6 }
+    ]
+  },
+  dependency: {
+    links: [],
+    linkLineStyle: null
+  },
+  grid: {
+    backgroundColor: '#f7fbfb',
+    alternatingBackgroundColor: '#f8fbfb',
+    verticalLine: { lineColor: '#e8eeee' },
+    horizontalLine: { lineColor: '#edf1f2' },
+    backgroundRanges: [],
+    rowBackgroundRanges: []
+  },
+  markLine: null,
   onScroll: null
 }
 
@@ -49,15 +78,15 @@ export default class VanillaGantt {
     this.scrollTop = 0
     this.scrollLeft = 0
     this.disposers = []
-    this.seedExpandedRows(this.options.rows)
+    this.seedExpandedRows(this.options.records)
     this.render()
   }
 
   setOptions(options = {}) {
-    const previousRows = this.options.rows
+    const previousRecords = this.options.records
     this.options = mergeOptions(this.options, options)
-    if (options.rows && options.rows !== previousRows) {
-      this.seedExpandedRows(options.rows, true)
+    if (options.records && options.records !== previousRecords) {
+      this.seedExpandedRows(options.records, true)
     }
     this.render()
   }
@@ -76,7 +105,8 @@ export default class VanillaGantt {
     this.cleanup()
 
     const root = el('div', 'vg')
-    root.style.setProperty('--vg-left-width', `${this.options.leftWidth}px`)
+    root.style.setProperty('--vg-left-width', `${this.tableWidth}px`)
+    this.rootEl = root
 
     const left = el('div', 'vg-left')
     const right = el('div', 'vg-right')
@@ -97,13 +127,86 @@ export default class VanillaGantt {
   renderLeftHeader() {
     const header = el('div', 'vg-left-header')
     header.style.height = `${this.headerHeight}px`
-    const custom = this.resolveContent(this.options.renderTableHeader, { gantt: this })
+    header.style.gridTemplateColumns = this.tableGridTemplateColumns
+    this.leftHeaderEl = header
+    const custom = this.resolveContent(this.taskListTable.renderHeader, { gantt: this })
     if (custom) {
       header.append(custom)
     } else {
-      header.textContent = '工位'
+      this.tableColumns.forEach((column, columnIndex) => {
+        header.append(this.renderTableHeaderCell(column, columnIndex))
+      })
     }
     return header
+  }
+
+  renderTableHeaderCell(column, columnIndex) {
+    const cell = el('div', `vg-table-header-cell${column.className ? ` ${column.className}` : ''}`)
+    const content = el('div', 'vg-table-header-content')
+    content.style.justifyContent = alignToFlex(column.headerAlign || column.align || 'left')
+    const custom = this.resolveContent(column.renderHeader, {
+      column,
+      columnIndex,
+      gantt: this
+    })
+    if (custom) {
+      content.append(custom)
+    } else {
+      content.textContent = column.title || column.field || ''
+    }
+    cell.append(content)
+
+    if (this.isColumnResizable(column)) {
+      cell.append(this.renderColumnResizeHandle(column, columnIndex))
+    }
+    return cell
+  }
+
+  renderColumnResizeHandle(column, columnIndex) {
+    const handle = el('span', 'vg-column-resize-handle')
+    const onMouseDown = event => {
+      const startX = event.clientX
+      const startWidth = this.columnWidth(column)
+      const onMove = moveEvent => {
+        const next = startWidth + moveEvent.clientX - startX
+        this.resizeColumn(columnIndex, next)
+      }
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove)
+        document.removeEventListener('mouseup', onUp)
+      }
+      document.addEventListener('mousemove', onMove)
+      document.addEventListener('mouseup', onUp)
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    handle.addEventListener('mousedown', onMouseDown)
+    this.disposers.push(() => handle.removeEventListener('mousedown', onMouseDown))
+    return handle
+  }
+
+  resizeColumn(columnIndex, width) {
+    const sourceColumn = this.sourceTableColumns[columnIndex]
+    if (!sourceColumn) return
+
+    const minWidth = Number(sourceColumn.minWidth || 48)
+    const maxWidth = Number(sourceColumn.maxWidth || 600)
+    sourceColumn.width = Math.min(maxWidth, Math.max(minWidth, Math.round(width)))
+    if (typeof this.taskListTable.tableWidth === 'number') {
+      this.taskListTable.tableWidth = this.sourceTableColumns.reduce((total, item) => total + this.columnWidth(item), 0)
+    }
+    this.syncTableLayout()
+  }
+
+  syncTableLayout() {
+    const width = this.tableWidth
+    if (this.rootEl) this.rootEl.style.setProperty('--vg-left-width', `${width}px`)
+    if (this.leftHeaderEl) this.leftHeaderEl.style.gridTemplateColumns = this.tableGridTemplateColumns
+    if (this.leftBodyInner) {
+      Array.from(this.leftBodyInner.children).forEach(row => {
+        row.style.gridTemplateColumns = this.tableGridTemplateColumns
+      })
+    }
   }
 
   renderLeftBody() {
@@ -116,27 +219,57 @@ export default class VanillaGantt {
     this.visibleRows.forEach(row => {
       const rowEl = el('div', `vg-row${row.children ? ' vg-row--group' : ''}`)
       rowEl.style.height = `${row.height || this.options.rowHeight}px`
-      const custom = this.resolveContent(this.options.renderRow, {
-        row,
-        expanded: this.isExpanded(row),
-        toggle: () => this.toggleRow(row),
-        gantt: this
+      rowEl.style.gridTemplateColumns = this.tableGridTemplateColumns
+      this.tableColumns.forEach((column, columnIndex) => {
+        rowEl.append(this.renderTableCell(row, column, columnIndex))
       })
-
-      if (custom) {
-        rowEl.append(custom)
-      } else {
-        rowEl.append(this.renderDefaultRow(row))
-      }
       inner.append(rowEl)
     })
 
     body.append(inner)
+    const onWheel = event => {
+      if (!this.scrollEl || !event.deltaY) return
+      this.scrollEl.scrollTop += event.deltaY
+      event.preventDefault()
+    }
+    body.addEventListener('wheel', onWheel, { passive: false })
+    this.disposers.push(() => body.removeEventListener('wheel', onWheel))
     return body
   }
 
-  renderDefaultRow(row) {
-    const fragment = document.createDocumentFragment()
+  renderTableCell(row, column, columnIndex) {
+    const cell = el('div', `vg-table-cell${column.className ? ` ${column.className}` : ''}`)
+    cell.style.justifyContent = alignToFlex(column.align || 'left')
+
+    const value = this.getCellValue(row, column, columnIndex)
+    const payload = {
+      value,
+      record: row,
+      row,
+      column,
+      columnIndex,
+      expanded: this.isExpanded(row),
+      toggle: () => this.toggleRow(row),
+      gantt: this
+    }
+    const custom = this.resolveContent(column.renderCell || this.taskListTable.renderCell, payload)
+    if (custom) {
+      cell.append(custom)
+      this.bindTemplateToggle(cell, row)
+      return cell
+    }
+
+    if (this.isTreeColumn(column, columnIndex)) {
+      cell.append(this.renderTreeCell(row, value))
+    } else if (column.field === 'load') {
+      cell.append(this.renderLoadCell(row, value))
+    } else {
+      cell.textContent = value === undefined || value === null ? '' : String(value)
+    }
+    return cell
+  }
+
+  renderTreeCell(row, value) {
     const name = el('div', `vg-row-name${row.children ? ' vg-row-name--toggle' : ''}`)
     name.style.paddingLeft = `${row.level * 16}px`
     if (row.children) {
@@ -146,35 +279,72 @@ export default class VanillaGantt {
       name.append(button)
       name.addEventListener('click', () => this.toggleRow(row))
     }
-    name.append(document.createTextNode(row.name || ''))
-    fragment.append(name)
+    name.append(document.createTextNode(value === undefined || value === null ? '' : String(value)))
+    return name
+  }
 
-    if (row.load !== undefined) {
-      const load = el('div', 'vg-row-load')
-      const label = el('span')
-      label.textContent = '当日负载'
-      const bar = el('i')
-      bar.style.width = `${row.load}%`
-      bar.style.background = this.loadColor(row.load)
-      const value = el('b')
-      value.textContent = `${row.load}%`
-      value.style.color = this.loadColor(row.load)
-      load.append(label, bar, value)
-      fragment.append(load)
+  renderLoadCell(row, value) {
+    const loadValue = value === undefined ? row.load : value
+    if (loadValue === undefined || loadValue === null) return document.createTextNode('')
+
+    const load = el('div', 'vg-row-load')
+    const bar = el('i')
+    bar.style.width = `${loadValue}%`
+    bar.style.background = this.loadColor(loadValue)
+    const valueNode = el('b')
+    valueNode.textContent = `${loadValue}%`
+    valueNode.style.color = this.loadColor(loadValue)
+    load.append(bar, valueNode)
+    return load
+  }
+
+  getCellValue(row, column, columnIndex) {
+    if (typeof column.valueGetter === 'function') {
+      return column.valueGetter({
+        record: row,
+        row,
+        column,
+        columnIndex,
+        gantt: this
+      })
     }
+    return column.field ? row[column.field] : undefined
+  }
 
-    return fragment
+  isTreeColumn(column, columnIndex) {
+    return column.tree === true || (column.tree !== false && columnIndex === 0 && column.field === 'name')
+  }
+
+  isColumnResizable(column) {
+    if (column.resizable === false) return false
+    return this.taskListTable.columnResizable !== false
+  }
+
+  bindTemplateToggle(root, row) {
+    if (!row.children) return
+    root.querySelectorAll('[data-vg-toggle]').forEach(node => {
+      const onClick = event => {
+        event.preventDefault()
+        event.stopPropagation()
+        this.toggleRow(row)
+      }
+      node.addEventListener('click', onClick)
+      this.disposers.push(() => node.removeEventListener('click', onClick))
+    })
   }
 
   renderResizeHandle(root) {
     const handle = el('span', 'vg-resize-handle')
     const onMouseDown = event => {
       const startX = event.clientX
-      const startWidth = this.options.leftWidth
+      const startWidth = this.tableWidth
       const onMove = moveEvent => {
         const next = startWidth + moveEvent.clientX - startX
-        this.options.leftWidth = Math.min(this.options.maxLeftWidth, Math.max(this.options.minLeftWidth, next))
-        root.style.setProperty('--vg-left-width', `${this.options.leftWidth}px`)
+        this.taskListTable.tableWidth = Math.min(
+          this.taskListTable.maxTableWidth,
+          Math.max(this.taskListTable.minTableWidth, next)
+        )
+        root.style.setProperty('--vg-left-width', `${this.taskListTable.tableWidth}px`)
       }
       const onUp = () => {
         document.removeEventListener('mousemove', onMove)
@@ -192,6 +362,10 @@ export default class VanillaGantt {
   renderTimeline() {
     const viewport = el('div', 'vg-timeline-viewport')
     viewport.style.height = `${this.headerHeight}px`
+    if (this.timelineHeader.backgroundColor) {
+      viewport.style.background = this.timelineHeader.backgroundColor
+    }
+
     const stage = el('div', 'vg-timeline-stage')
     stage.style.width = `${this.chartWidth}px`
     stage.style.transform = `translateX(-${this.scrollLeft}px)`
@@ -204,11 +378,14 @@ export default class VanillaGantt {
       viewBox: `0 0 ${this.chartWidth} ${this.headerHeight}`
     })
 
-    this.majorUnits.forEach(unit => {
-      svg.append(this.renderTimelineUnit(unit, 0, this.options.dayHeaderHeight, true))
-    })
-    this.minorUnits.forEach(unit => {
-      svg.append(this.renderTimelineUnit(unit, this.options.dayHeaderHeight, this.options.hourHeaderHeight, false))
+    let y = 0
+    this.timelineUnitsByScale.forEach((units, scaleIndex) => {
+      const scale = this.timelineScales[scaleIndex]
+      const height = this.scaleRowHeight(scale)
+      units.forEach(unit => {
+        svg.append(this.renderTimelineUnit(unit, y, height, scale, scaleIndex))
+      })
+      y += height
     })
 
     stage.append(svg)
@@ -216,7 +393,7 @@ export default class VanillaGantt {
     return viewport
   }
 
-  renderTimelineUnit(unit, y, height, major) {
+  renderTimelineUnit(unit, y, height, scale, scaleIndex) {
     const fo = svgEl('foreignObject')
     attrs(fo, {
       x: unit.x,
@@ -224,11 +401,19 @@ export default class VanillaGantt {
       width: unit.width,
       height
     })
-    const content = this.resolveContent(this.options.renderTimeline, { unit, major, gantt: this })
-    if (content) {
-      fo.append(content)
+    const custom = this.resolveContent(scale.customLayout || this.timelineHeader.customLayout, {
+      dateInfo: unit,
+      unit,
+      scale,
+      scaleIndex,
+      major: scaleIndex === 0,
+      gantt: this
+    })
+    if (custom) {
+      fo.append(custom)
     } else {
-      const cell = el('div', `vg-timeline-cell${major ? ' vg-timeline-cell--major' : ''}`)
+      const cell = el('div', `vg-timeline-cell${scaleIndex === 0 ? ' vg-timeline-cell--major' : ''}`)
+      applyTimelineStyle(cell, scale.style)
       cell.textContent = unit.label
       fo.append(cell)
     }
@@ -294,44 +479,61 @@ export default class VanillaGantt {
   }
 
   appendGrid(svg) {
+    if (this.grid.backgroundColor) {
+      svg.append(this.rect(0, 0, this.chartWidth, this.bodyHeight, this.grid.backgroundColor))
+    }
+
     this.backgroundShades.forEach(shade => {
       svg.append(this.rect(shade.x, 0, shade.width, this.bodyHeight, shade.fill))
     })
-    this.visibleRestRanges.forEach(range => {
-      const rect = this.rect(this.timeToX(range.start), 0, this.durationWidth(range.start, range.end), this.bodyHeight, range.fill || '#edf1f1')
+
+    this.visibleBackgroundRanges.forEach(range => {
+      const rect = this.rect(
+        this.timeToX(range.startDate),
+        0,
+        this.durationWidth(range.startDate, range.endDate),
+        this.bodyHeight,
+        range.color || range.fill || '#edf1f1'
+      )
       rect.setAttribute('opacity', range.opacity === undefined ? 1 : range.opacity)
       svg.append(rect)
     })
-    this.verticalLines.forEach(line => {
-      svg.append(this.line(line.x, 0, line.x, this.bodyHeight, '#e8eeee'))
-    })
-    this.rowLines.forEach(line => {
-      svg.append(this.line(0, line.y, this.chartWidth, line.y, '#edf1f2'))
+
+    this.verticalLines.forEach((item, index) => {
+      const style = this.resolveStyle(this.grid.verticalLine, { index, dateIndex: index, date: item.startDate, ganttInstance: this })
+      const line = this.line(item.x, 0, item.x, this.bodyHeight, style.lineColor || '#e8eeee')
+      this.applyLineStyle(line, style)
+      svg.append(line)
     })
 
-    if (this.options.now) {
-      const now = this.line(this.nowX, 0, this.nowX, this.bodyHeight, '#35cce0')
-      now.setAttribute('stroke-dasharray', '4 4')
-      svg.append(now)
-    }
+    this.rowLines.forEach((item, index) => {
+      const style = this.resolveStyle(this.grid.horizontalLine, { index, ganttInstance: this })
+      const line = this.line(0, item.y, this.chartWidth, item.y, style.lineColor || '#edf1f2')
+      this.applyLineStyle(line, style)
+      svg.append(line)
+    })
 
-    this.visibleBlocks.forEach(block => {
+    this.markLines.forEach(markLine => {
+      this.appendMarkLine(svg, markLine)
+    })
+
+    this.visibleRowBackgroundRanges.forEach(range => {
       const rect = this.rect(
-        this.timeToX(block.start),
-        this.rowTop(block.rowId) + (block.offsetY || 0),
-        this.durationWidth(block.start, block.end),
-        block.height || this.options.rowHeight,
-        block.fill || '#dcf8c9'
+        this.timeToX(range.startDate),
+        this.rowTop(range.recordKey) + (range.offsetY || 0),
+        this.durationWidth(range.startDate, range.endDate),
+        range.height || this.options.rowHeight,
+        range.color || range.fill || '#dcf8c9'
       )
-      rect.setAttribute('opacity', block.opacity || 1)
+      rect.setAttribute('opacity', range.opacity === undefined ? 1 : range.opacity)
       svg.append(rect)
     })
 
     this.stripedTasks.forEach(task => {
       const rect = this.rect(
-        this.timeToX(task.start),
+        this.timeToX(this.taskStart(task)),
         this.taskY(task),
-        this.durationWidth(task.start, task.end),
+        this.durationWidth(this.taskStart(task), this.taskEnd(task)),
         this.taskRenderHeight(task),
         'url(#vg-diagonal-stripe)'
       )
@@ -339,18 +541,7 @@ export default class VanillaGantt {
     })
 
     this.visibleLinks.forEach(link => {
-      const line = this.line(
-        this.timeToX(link.fromTime),
-        this.rowTop(link.fromRowId) + link.fromY,
-        this.timeToX(link.toTime),
-        this.rowTop(link.toRowId) + link.toY,
-        link.color || '#43c51a'
-      )
-      line.setAttribute('stroke-width', 2)
-      if (link.dashed) line.setAttribute('stroke-dasharray', '5 4')
-      svg.append(line)
-      svg.append(this.circle(this.timeToX(link.fromTime), this.rowTop(link.fromRowId) + link.fromY, 5, link.color || '#43c51a'))
-      svg.append(this.circle(this.timeToX(link.toTime), this.rowTop(link.toRowId) + link.toY, 5, link.color || '#43c51a'))
+      this.appendLink(svg, link)
     })
 
     this.renderTasks.forEach(task => {
@@ -358,33 +549,111 @@ export default class VanillaGantt {
     })
   }
 
+  appendMarkLine(svg, markLine) {
+    const x = this.timeToX(markLine.date)
+    if (x < 0 || x > this.chartWidth) return
+
+    const style = markLine.style || {}
+    const line = this.line(x, 0, x, this.bodyHeight, style.lineColor || '#35cce0')
+    this.applyLineStyle(line, { lineDash: [4, 4], ...style })
+    svg.append(line)
+
+    if (!markLine.content) return
+    const text = svgEl('text', 'vg-mark-line-text')
+    attrs(text, {
+      x: x + 6,
+      y: 16,
+      fill: markLine.contentStyle && markLine.contentStyle.color ? markLine.contentStyle.color : style.lineColor || '#35cce0'
+    })
+    text.textContent = markLine.content
+    svg.append(text)
+  }
+
+  appendLink(svg, link) {
+    const from = this.taskLayoutByKey[firstKey(link.linkedFromTaskKey)]
+    const to = this.taskLayoutByKey[firstKey(link.linkedToTaskKey)]
+    if (!from || !to) return
+
+    const points = this.linkPoints(link.type, from, to)
+    const style = {
+      ...(this.dependency.linkLineStyle || {}),
+      ...(link.linkLineStyle || {})
+    }
+    const line = this.line(points.x1, points.y1, points.x2, points.y2, style.lineColor || link.color || '#43c51a')
+    this.applyLineStyle(line, { lineWidth: 2, ...style })
+    if (link.dashed) line.setAttribute('stroke-dasharray', '5 4')
+    svg.append(line)
+    svg.append(this.circle(points.x1, points.y1, 5, style.lineColor || link.color || '#43c51a'))
+    svg.append(this.circle(points.x2, points.y2, 5, style.lineColor || link.color || '#43c51a'))
+  }
+
+  linkPoints(type, from, to) {
+    const fromStart = from.x
+    const fromEnd = from.x + from.width
+    const toStart = to.x
+    const toEnd = to.x + to.width
+    const normalizedType = type || 'finish_to_start'
+
+    if (normalizedType === 'start_to_start') {
+      return { x1: fromStart, y1: from.centerY, x2: toStart, y2: to.centerY }
+    }
+    if (normalizedType === 'finish_to_finish') {
+      return { x1: fromEnd, y1: from.centerY, x2: toEnd, y2: to.centerY }
+    }
+    if (normalizedType === 'start_to_finish') {
+      return { x1: fromStart, y1: from.centerY, x2: toEnd, y2: to.centerY }
+    }
+    return { x1: fromEnd, y1: from.centerY, x2: toStart, y2: to.centerY }
+  }
+
   renderTask(task) {
+    const width = this.durationWidth(this.taskStart(task), this.taskEnd(task))
+    const height = this.taskRenderHeight(task)
     const fo = svgEl('foreignObject')
     attrs(fo, {
-      x: this.timeToX(task.start),
+      x: this.timeToX(this.taskStart(task)),
       y: this.taskY(task),
-      width: this.durationWidth(task.start, task.end),
-      height: this.taskRenderHeight(task)
+      width,
+      height
     })
 
-    const row = this.rowById[task.rowId]
-    const custom = this.resolveContent(this.options.renderTask, { task, row, gantt: this })
+    const row = this.rowById[task.__rowId]
+    const payload = {
+      taskRecord: task,
+      task,
+      rowRecord: row,
+      row,
+      width,
+      height,
+      startDate: new Date(toTime(this.taskStart(task))),
+      endDate: new Date(toTime(this.taskEnd(task))),
+      progress: this.taskProgress(task),
+      ganttInstance: this,
+      gantt: this
+    }
+    const custom = this.resolveContent(this.taskBar.customLayout, payload)
     fo.append(custom || this.renderDefaultTask(task))
     return fo
   }
 
   renderDefaultTask(task) {
-    const root = el('div', `vg-task vg-task--${task.status || 'normal'}`)
+    const status = this.taskStatus(task)
+    const root = el('div', `vg-task vg-task--${status || 'normal'}`)
+    const style = this.taskStyle(task)
+    this.applyTaskStyle(root, style, task)
+
     const title = el('div', 'vg-task-title')
-    title.textContent = task.title || ''
+    title.textContent = this.taskLabel(task, this.taskBar.labelText)
     const meta = el('div', 'vg-task-meta')
-    meta.textContent = task.subtitle || ''
+    meta.textContent = this.taskLabel(task, this.taskBar.subLabelText)
     root.append(title, meta)
 
-    if (task.progress !== undefined) {
+    const progressValue = this.taskProgress(task)
+    if (progressValue !== undefined) {
       const progress = el('div', 'vg-task-progress')
       const bar = el('i')
-      bar.style.width = `${task.progress}%`
+      bar.style.width = `${progressValue}%`
+      if (style.completedBarColor) bar.style.background = style.completedBarColor
       progress.append(bar)
       root.append(progress)
     }
@@ -396,6 +665,17 @@ export default class VanillaGantt {
     }
 
     return root
+  }
+
+  applyTaskStyle(node, style, task) {
+    if (!style) return
+    const progressValue = this.taskProgress(task)
+    const background = progressValue >= 100 && style.completedBarColor ? style.completedBarColor : style.barColor
+    if (background) node.style.background = background
+    if (style.borderColor) node.style.borderColor = style.borderColor
+    if (style.borderLineWidth !== undefined) node.style.borderWidth = `${style.borderLineWidth}px`
+    if (style.borderWidth !== undefined) node.style.borderWidth = `${style.borderWidth}px`
+    if (style.cornerRadius !== undefined) node.style.borderRadius = `${style.cornerRadius}px`
   }
 
   rect(x, y, width, height, fill) {
@@ -416,37 +696,95 @@ export default class VanillaGantt {
     return circle
   }
 
+  applyLineStyle(line, style = {}) {
+    if (style.lineWidth !== undefined) line.setAttribute('stroke-width', style.lineWidth)
+    if (style.lineDash) line.setAttribute('stroke-dasharray', style.lineDash.join(' '))
+  }
+
+  resolveStyle(style, payload) {
+    if (typeof style === 'function') return style(payload) || {}
+    return style || {}
+  }
+
   resolveContent(renderer, payload) {
     if (typeof renderer !== 'function') return null
     const result = renderer(payload)
     if (result === undefined || result === null) return null
     if (result instanceof Node) return result
-    const wrapper = el('div')
-    wrapper.innerHTML = String(result)
-    return wrapper
+    if (result.rootContainer instanceof Node) return result.rootContainer
+    const template = document.createElement('template')
+    template.innerHTML = String(result).trim()
+    return template.content
   }
 
-  seedExpandedRows(rows, applyExplicit = false) {
-    rows.forEach(row => {
-      if (row.children) {
-        if (applyExplicit && row.expanded !== undefined) {
-          this.expandedRows[row.id] = row.expanded !== false
-        } else if (this.expandedRows[row.id] === undefined) {
-          this.expandedRows[row.id] = row.expanded !== false
+  seedExpandedRows(records, applyExplicit = false) {
+    records.forEach(record => {
+      if (record.children) {
+        const key = this.recordKey(record)
+        if (applyExplicit && record.expanded !== undefined) {
+          this.expandedRows[key] = record.expanded !== false
+        } else if (this.expandedRows[key] === undefined) {
+          this.expandedRows[key] = record.expanded !== false
         }
-        this.seedExpandedRows(row.children, applyExplicit)
+        this.seedExpandedRows(record.children, applyExplicit)
       }
     })
   }
 
   isExpanded(row) {
-    return row.children ? this.expandedRows[row.id] !== false : false
+    return row.children ? this.expandedRows[this.recordKey(row)] !== false : false
   }
 
   toggleRow(row) {
     if (!row.children) return
-    this.expandedRows[row.id] = !this.isExpanded(row)
+    const key = this.recordKey(row)
+    this.expandedRows[key] = !this.isExpanded(row)
     this.render()
+  }
+
+  recordKey(record) {
+    return record.__recordKey || record[this.options.recordKeyField]
+  }
+
+  taskKey(task) {
+    return task[this.options.taskKeyField]
+  }
+
+  taskStart(task) {
+    return task[this.taskBar.startDateField]
+  }
+
+  taskEnd(task) {
+    return task[this.taskBar.endDateField]
+  }
+
+  taskProgress(task) {
+    return task[this.taskBar.progressField]
+  }
+
+  taskLane(task) {
+    return task[this.taskBar.laneField]
+  }
+
+  taskStatus(task) {
+    return task[this.taskBar.statusField]
+  }
+
+  taskLabel(task, label) {
+    if (!label) return ''
+    if (typeof label === 'function') return label(task)
+    return task[label] === undefined ? String(label) : String(task[label])
+  }
+
+  taskStyle(task) {
+    const style = task.parentAggregate ? this.taskBar.projectStyle : this.taskBar.barStyle
+    return this.resolveStyle(style, {
+      taskRecord: task,
+      index: this.renderTasks.findIndex(item => this.taskKey(item) === this.taskKey(task)),
+      startDate: new Date(toTime(this.taskStart(task))),
+      endDate: new Date(toTime(this.taskEnd(task))),
+      ganttInstance: this
+    })
   }
 
   timeToX(value) {
@@ -454,63 +792,92 @@ export default class VanillaGantt {
   }
 
   durationWidth(start, end) {
-    return Math.max(4, this.timeToX(end) - this.timeToX(start))
+    return Math.max(this.taskMinWidth, this.timeToX(end) - this.timeToX(start))
   }
 
-  rowTop(rowId) {
+  rowTop(recordKey) {
     let top = 0
     for (const row of this.visibleRows) {
-      if (row.id === rowId) return top
+      if (this.recordKey(row) === recordKey) return top
       top += row.height || this.options.rowHeight
     }
     return 0
   }
 
   taskY(task) {
-    return this.rowTop(task.rowId) + this.taskOffsetY(task)
+    return this.rowTop(task.__rowId) + this.taskOffsetY(task)
   }
 
   taskOffsetY(task) {
-    if (task.summary && task.offsetY !== undefined) return task.offsetY
-    if (task.lane && this.laneByKey[task.lane]) return this.laneByKey[task.lane].offset
+    if (task.parentAggregate && task.offsetY !== undefined) return task.offsetY
+    const lane = this.taskLane(task)
+    if (lane && this.laneByKey[lane]) return this.laneByKey[lane].offset
     return task.offsetY === undefined ? 10 : task.offsetY
   }
 
   taskRenderHeight(task) {
-    if (task.summary && task.height !== undefined) return task.height
-    if (task.lane && this.laneByKey[task.lane]) return this.laneByKey[task.lane].height
-    return task.height || this.options.taskHeight
+    if (task.parentAggregate && task.height !== undefined) return task.height
+    const lane = this.taskLane(task)
+    if (lane && this.laneByKey[lane]) return this.laneByKey[lane].height
+    if (task.height) return task.height
+    const style = this.taskStyle(task)
+    return style.width || this.options.taskHeight
   }
 
-  createUnits(unit, step = 1) {
+  createUnits(scale, scaleIndex) {
     const units = []
-    let cursor = this.floorDate(new Date(this.options.start), unit)
+    const unit = scale.unit || 'hour'
+    const step = scale.step || 1
+    let cursor = this.floorDate(new Date(this.startTime), unit, scale.startOfWeek)
+    let dateIndex = 0
     while (cursor.getTime() < this.endTime) {
       const unitStart = Math.max(cursor.getTime(), this.startTime)
       const next = this.addUnit(cursor, unit, step)
       const unitEnd = Math.min(next.getTime(), this.endTime)
       if (unitEnd > unitStart) {
-        units.push({
+        const info = {
           type: unit,
+          unit,
+          step,
+          scaleIndex,
+          dateIndex,
           key: `${unit}-${cursor.toISOString()}`,
-          label: this.formatUnitLabel(cursor, unit),
+          title: this.formatUnitLabel(cursor, unit),
+          label: this.formatTimelineLabel(scale, unitStart, unitEnd, dateIndex),
+          startDate: new Date(unitStart),
+          endDate: new Date(unitEnd),
+          days: Math.max(1, Math.ceil((unitEnd - unitStart) / (24 * HOUR))),
           x: this.timeToX(unitStart),
-          width: this.durationWidth(unitStart, unitEnd)
-        })
+          width: Math.max(1, this.timeToX(unitEnd) - this.timeToX(unitStart))
+        }
+        units.push(info)
+        dateIndex += 1
       }
       cursor = next
     }
     return units
   }
 
-  floorDate(date, unit) {
+  formatTimelineLabel(scale, startTime, endTime, dateIndex) {
+    if (typeof scale.format === 'function') {
+      return scale.format({
+        dateIndex,
+        startDate: new Date(startTime),
+        endDate: new Date(endTime)
+      })
+    }
+    return this.formatUnitLabel(new Date(startTime), scale.unit)
+  }
+
+  floorDate(date, unit, startOfWeek = 'monday') {
     const next = new Date(date)
     next.setSeconds(0, 0)
     if (unit !== 'minute') next.setMinutes(0)
     if (!['minute', 'hour'].includes(unit)) next.setHours(0)
     if (unit === 'week') {
       const day = next.getDay() || 7
-      next.setDate(next.getDate() - day + 1)
+      const offset = startOfWeek === 'sunday' ? next.getDay() : day - 1
+      next.setDate(next.getDate() - offset)
     }
     if (unit === 'month') next.setDate(1)
     if (unit === 'year') {
@@ -551,11 +918,15 @@ export default class VanillaGantt {
     return String(date.getHours()).padStart(2, '0')
   }
 
-  getDescendantRowIds(row) {
+  scaleRowHeight(scale) {
+    return scale.rowHeight || this.options.headerRowHeight
+  }
+
+  getDescendantRecordKeys(row) {
     const ids = []
     const walk = children => {
       children.forEach(child => {
-        ids.push(child.id)
+        ids.push(this.recordKey(child))
         if (child.children) walk(child.children)
       })
     }
@@ -569,12 +940,13 @@ export default class VanillaGantt {
 
   isPrimaryTask(task) {
     if (task.logistics) return false
-    if (!task.lane) return true
-    return task.lane === 'plan' || task.lane.startsWith('plan-')
+    const lane = this.taskLane(task)
+    if (!lane) return true
+    return lane === 'plan' || String(lane).startsWith('plan-')
   }
 
-  isExpandedParentRow(rowId) {
-    const row = this.rowById[rowId]
+  isExpandedParentRow(recordKey) {
+    const row = this.rowById[recordKey]
     return row && row.children && this.isExpanded(row)
   }
 
@@ -591,16 +963,78 @@ export default class VanillaGantt {
     return '#43c51a'
   }
 
+  get taskListTable() {
+    return this.options.taskListTable || {}
+  }
+
+  get timelineHeader() {
+    return this.options.timelineHeader || {}
+  }
+
+  get taskBar() {
+    return this.options.taskBar || {}
+  }
+
+  get dependency() {
+    return this.options.dependency || {}
+  }
+
+  get grid() {
+    return this.options.grid || {}
+  }
+
+  get tableWidth() {
+    if (typeof this.taskListTable.tableWidth === 'number') return this.taskListTable.tableWidth
+    return this.tableColumns.reduce((total, column) => total + this.columnWidth(column), 0)
+  }
+
+  get tableColumns() {
+    return this.sourceTableColumns.map(column => ({
+      width: 120,
+      ...column
+    }))
+  }
+
+  get sourceTableColumns() {
+    return this.taskListTable.columns && this.taskListTable.columns.length
+      ? this.taskListTable.columns
+      : DEFAULT_OPTIONS.taskListTable.columns
+  }
+
+  get tableGridTemplateColumns() {
+    return this.tableColumns.map((column, index) => {
+      const width = this.columnWidth(column)
+      if (index === this.tableColumns.length - 1) return `minmax(${width}px, 1fr)`
+      return `${width}px`
+    }).join(' ')
+  }
+
+  columnWidth(column) {
+    return Number(column.width || column.minWidth || 120)
+  }
+
   get startTime() {
-    return toTime(this.options.start)
+    const value = this.options.minDate || this.derivedStartTime
+    return toTime(value)
   }
 
   get endTime() {
-    return toTime(this.options.end)
+    const value = this.options.maxDate || this.derivedEndTime
+    return toTime(value)
+  }
+
+  get derivedStartTime() {
+    const values = this.allTasks.map(task => toTime(this.taskStart(task))).filter(Number.isFinite)
+    return values.length ? Math.min(...values) : Date.now()
+  }
+
+  get derivedEndTime() {
+    const values = this.allTasks.map(task => toTime(this.taskEnd(task))).filter(Number.isFinite)
+    return values.length ? Math.max(...values) : this.derivedStartTime + 24 * HOUR
   }
 
   get headerHeight() {
-    return this.options.dayHeaderHeight + this.options.hourHeaderHeight
+    return this.timelineScales.reduce((total, scale) => total + this.scaleRowHeight(scale), 0)
   }
 
   get bodyHeight() {
@@ -611,21 +1045,17 @@ export default class VanillaGantt {
     return Math.max(1, this.endTime - this.startTime)
   }
 
-  get normalizedScale() {
-    return {
-      unit: this.options.timeScale.unit || 'hour',
-      step: this.options.timeScale.step || 2,
-      pxPerUnit: this.options.timeScale.pxPerUnit || 56,
-      topUnit: this.options.timeScale.topUnit || 'day'
-    }
+  get baseTimelineScale() {
+    const scales = this.timelineScales
+    return scales[scales.length - 1] || DEFAULT_OPTIONS.timelineHeader.scales[1]
   }
 
   get scaleMs() {
-    return this.unitToMs(this.normalizedScale.unit) * this.normalizedScale.step
+    return this.unitToMs(this.baseTimelineScale.unit) * (this.baseTimelineScale.step || 1)
   }
 
   get scalePx() {
-    return this.normalizedScale.pxPerUnit
+    return this.baseTimelineScale.colWidth || this.timelineHeader.colWidth || DEFAULT_OPTIONS.timelineHeader.colWidth
   }
 
   get pxPerMs() {
@@ -636,85 +1066,112 @@ export default class VanillaGantt {
     return Math.max(1, Math.ceil((this.rangeMs / this.scaleMs) * this.scalePx))
   }
 
-  get flatRows() {
-    const rows = []
-    const walk = (items, level = 0) => {
-      items.forEach(row => {
-        rows.push({ ...row, level })
-        if (row.children) walk(row.children, level + 1)
-      })
-    }
-    walk(this.options.rows)
-    return rows
+  get timelineScales() {
+    return (this.timelineHeader.scales || []).filter(scale => scale.visible !== false)
   }
 
-  get visibleRows() {
-    const rows = []
-    const walk = (items, level = 0) => {
-      items.forEach(row => {
-        const normalized = { ...row, level }
-        rows.push(normalized)
-        if (row.children && this.isExpanded(normalized)) {
-          walk(row.children, level + 1)
-        }
-      })
-    }
-    walk(this.options.rows)
-    return rows
-  }
-
-  get visibleRowIds() {
-    return this.visibleRows.reduce((ids, row) => {
-      ids[row.id] = true
-      return ids
-    }, {})
-  }
-
-  get rowById() {
-    return this.flatRows.reduce((map, row) => {
-      map[row.id] = row
-      return map
-    }, {})
-  }
-
-  get laneByKey() {
-    return this.options.lanes.reduce((map, lane) => {
-      map[lane.key] = lane
-      return map
-    }, {})
+  get timelineUnitsByScale() {
+    return this.timelineScales.map((scale, index) => this.createUnits(scale, index))
   }
 
   get majorUnits() {
-    return this.createUnits(this.normalizedScale.topUnit)
+    return this.timelineUnitsByScale[0] || []
   }
 
-  get minorUnits() {
-    return this.createUnits(this.normalizedScale.unit, this.normalizedScale.step)
+  get baseUnits() {
+    const units = this.timelineUnitsByScale
+    return units[units.length - 1] || []
   }
 
   get verticalLines() {
-    return this.minorUnits.map(unit => ({ key: `line-${unit.key}`, x: unit.x }))
+    return this.baseUnits.map(unit => ({ key: `line-${unit.key}`, x: unit.x, startDate: unit.startDate }))
   }
 
   get rowLines() {
     let top = 0
     return this.visibleRows.map(row => {
       top += row.height || this.options.rowHeight
-      return { key: row.id, y: top }
+      return { key: this.recordKey(row), y: top }
     })
   }
 
-  get nowX() {
-    return this.timeToX(this.options.now || this.options.start)
-  }
-
   get backgroundShades() {
-    return this.majorUnits.map(unit => ({
+    const fill = this.grid.alternatingBackgroundColor
+    if (!fill) return []
+    return this.majorUnits.filter((unit, index) => index % 2 === 0).map(unit => ({
       key: `shade-${unit.key}`,
       x: unit.x,
       width: unit.width,
-      fill: '#f8fbfb'
+      fill
     }))
+  }
+
+  get flatRows() {
+    const rows = []
+    const walk = (items, level = 0) => {
+      items.forEach(record => {
+        rows.push({ ...record, __recordKey: this.recordKey(record), level })
+        if (record.children) walk(record.children, level + 1)
+      })
+    }
+    walk(this.options.records)
+    return rows
+  }
+
+  get visibleRows() {
+    const rows = []
+    const walk = (items, level = 0) => {
+      items.forEach(record => {
+        const normalized = { ...record, __recordKey: this.recordKey(record), level }
+        rows.push(normalized)
+        if (record.children && this.isExpanded(normalized)) {
+          walk(record.children, level + 1)
+        }
+      })
+    }
+    walk(this.options.records)
+    return rows
+  }
+
+  get visibleRowIds() {
+    return this.visibleRows.reduce((ids, row) => {
+      ids[this.recordKey(row)] = true
+      return ids
+    }, {})
+  }
+
+  get rowById() {
+    return this.flatRows.reduce((map, row) => {
+      map[this.recordKey(row)] = row
+      return map
+    }, {})
+  }
+
+  get laneByKey() {
+    return (this.taskBar.lanes || []).reduce((map, lane) => {
+      map[lane.key] = lane
+      return map
+    }, {})
+  }
+
+  get allTasks() {
+    const tasks = []
+    const tasksField = this.taskBar.tasksField
+    const walk = records => {
+      records.forEach(record => {
+        const recordKey = this.recordKey(record)
+        const rowTasks = Array.isArray(record[tasksField]) ? record[tasksField] : []
+        rowTasks.forEach(task => {
+          tasks.push({
+            ...task,
+            __rowId: recordKey
+          })
+        })
+        if (record.children) walk(record.children)
+      })
+    }
+    walk(this.options.records)
+    return tasks
   }
 
   get renderTasks() {
@@ -726,56 +1183,103 @@ export default class VanillaGantt {
   }
 
   get visibleTasks() {
-    return this.options.tasks.filter(task => this.visibleRowIds[task.rowId])
+    return this.allTasks.filter(task => {
+      const row = this.rowById[task.__rowId]
+      return row &&
+        !row.children &&
+        this.visibleRowIds[task.__rowId] &&
+        this.overlapsRange(this.taskStart(task), this.taskEnd(task))
+    })
   }
 
   get parentTimelineTasks() {
     const tasks = []
     this.visibleRows.forEach(row => {
       if (!row.children || this.isExpanded(row)) return
-      const descendantIds = this.getDescendantRowIds(row)
-      const childTasks = this.options.tasks.filter(task => {
-        return descendantIds.includes(task.rowId) && this.isPrimaryTask(task) && this.overlapsRange(task.start, task.end)
+      const descendantIds = this.getDescendantRecordKeys(row)
+      const childTasks = this.allTasks.filter(task => {
+        return descendantIds.includes(task.__rowId) &&
+          this.isPrimaryTask(task) &&
+          this.overlapsRange(this.taskStart(task), this.taskEnd(task))
       })
       if (!childTasks.length) return
 
-      const start = Math.min(...childTasks.map(task => toTime(task.start)))
-      const end = Math.max(...childTasks.map(task => toTime(task.end)))
-      const progressTasks = childTasks.filter(task => task.progress !== undefined)
+      const start = Math.min(...childTasks.map(task => toTime(this.taskStart(task))))
+      const end = Math.max(...childTasks.map(task => toTime(this.taskEnd(task))))
+      const progressTasks = childTasks.filter(task => this.taskProgress(task) !== undefined)
       const progress = progressTasks.length
-        ? Math.round(progressTasks.reduce((total, task) => total + task.progress, 0) / progressTasks.length)
+        ? Math.round(progressTasks.reduce((total, task) => total + this.taskProgress(task), 0) / progressTasks.length)
         : undefined
 
       tasks.push({
-        id: `${row.id}__aggregate`,
-        rowId: row.id,
+        [this.options.taskKeyField]: `${this.recordKey(row)}__aggregate`,
+        [this.taskBar.startDateField]: start,
+        [this.taskBar.endDateField]: end,
+        [this.taskBar.progressField]: progress,
+        [this.taskBar.statusField]: this.taskStatus(childTasks[0]),
         title: row.name,
         subtitle: `${childTasks.length} 个工单`,
-        start,
-        end,
-        status: childTasks[0].status,
         workStatus: this.aggregateWorkStatus(childTasks),
-        progress,
         completed: childTasks.every(task => task.completed),
         predecessorIncomplete: childTasks.some(task => task.predecessorIncomplete),
         height: Math.max(28, (row.height || this.options.rowHeight) - 12),
         offsetY: 6,
-        parentAggregate: true
+        parentAggregate: true,
+        __rowId: this.recordKey(row)
       })
     })
     return tasks
   }
 
-  get visibleBlocks() {
-    return this.options.blocks.filter(block => this.visibleRowIds[block.rowId] && !this.isExpandedParentRow(block.rowId))
+  get visibleBackgroundRanges() {
+    return (this.grid.backgroundRanges || []).filter(range => {
+      return toTime(range.endDate) > this.startTime && toTime(range.startDate) < this.endTime
+    })
+  }
+
+  get visibleRowBackgroundRanges() {
+    return (this.grid.rowBackgroundRanges || []).filter(range => {
+      return this.visibleRowIds[range.recordKey] &&
+        !this.isExpandedParentRow(range.recordKey) &&
+        toTime(range.endDate) > this.startTime &&
+        toTime(range.startDate) < this.endTime
+    })
+  }
+
+  get markLines() {
+    if (!this.options.markLine || this.options.markLine === true) return []
+    return Array.isArray(this.options.markLine) ? this.options.markLine : [this.options.markLine]
+  }
+
+  get taskLayoutByKey() {
+    return this.renderTasks.reduce((map, task) => {
+      const key = this.taskKey(task)
+      if (!key) return map
+      const y = this.taskY(task)
+      const height = this.taskRenderHeight(task)
+      map[key] = {
+        task,
+        x: this.timeToX(this.taskStart(task)),
+        y,
+        width: this.durationWidth(this.taskStart(task), this.taskEnd(task)),
+        height,
+        centerY: y + height / 2
+      }
+      return map
+    }, {})
   }
 
   get visibleLinks() {
-    return this.options.links.filter(link => this.visibleRowIds[link.fromRowId] && this.visibleRowIds[link.toRowId])
+    return (this.dependency.links || []).filter(link => {
+      return this.taskLayoutByKey[firstKey(link.linkedFromTaskKey)] &&
+        this.taskLayoutByKey[firstKey(link.linkedToTaskKey)]
+    })
   }
 
-  get visibleRestRanges() {
-    return this.options.restRanges.filter(range => toTime(range.end) > this.startTime && toTime(range.start) < this.endTime)
+  get taskMinWidth() {
+    if (typeof this.taskBar.barStyle === 'function') return 4
+    const style = this.resolveStyle(this.taskBar.barStyle, {})
+    return style.minSize || 4
   }
 }
 
@@ -783,17 +1287,61 @@ function mergeOptions(base, patch) {
   return {
     ...base,
     ...patch,
-    timeScale: {
-      ...(base.timeScale || {}),
-      ...(patch.timeScale || {})
+    taskListTable: {
+      ...(base.taskListTable || {}),
+      ...(patch.taskListTable || {})
     },
-    lanes: patch.lanes || base.lanes || [],
-    rows: patch.rows || base.rows || [],
-    tasks: patch.tasks || base.tasks || [],
-    blocks: patch.blocks || base.blocks || [],
-    links: patch.links || base.links || [],
-    restRanges: patch.restRanges || base.restRanges || []
+    timelineHeader: {
+      ...(base.timelineHeader || {}),
+      ...(patch.timelineHeader || {}),
+      scales: patch.timelineHeader && patch.timelineHeader.scales
+        ? patch.timelineHeader.scales
+        : (base.timelineHeader && base.timelineHeader.scales) || []
+    },
+    taskBar: {
+      ...(base.taskBar || {}),
+      ...(patch.taskBar || {}),
+      lanes: patch.taskBar && patch.taskBar.lanes
+        ? patch.taskBar.lanes
+        : (base.taskBar && base.taskBar.lanes) || []
+    },
+    dependency: {
+      ...(base.dependency || {}),
+      ...(patch.dependency || {}),
+      links: patch.dependency && patch.dependency.links
+        ? patch.dependency.links
+        : (base.dependency && base.dependency.links) || []
+    },
+    grid: {
+      ...(base.grid || {}),
+      ...(patch.grid || {}),
+      backgroundRanges: patch.grid && patch.grid.backgroundRanges
+        ? patch.grid.backgroundRanges
+        : (base.grid && base.grid.backgroundRanges) || [],
+      rowBackgroundRanges: patch.grid && patch.grid.rowBackgroundRanges
+        ? patch.grid.rowBackgroundRanges
+        : (base.grid && base.grid.rowBackgroundRanges) || []
+    },
+    records: patch.records || base.records || []
   }
+}
+
+function applyTimelineStyle(node, style = {}) {
+  if (style.backgroundColor) node.style.background = style.backgroundColor
+  if (style.color) node.style.color = style.color
+  if (style.fontSize) node.style.fontSize = `${style.fontSize}px`
+  if (style.fontWeight) node.style.fontWeight = style.fontWeight
+  if (style.textAlign) node.style.justifyContent = alignToFlex(style.textAlign)
+}
+
+function alignToFlex(value) {
+  if (value === 'left' || value === 'start') return 'flex-start'
+  if (value === 'right' || value === 'end') return 'flex-end'
+  return 'center'
+}
+
+function firstKey(value) {
+  return Array.isArray(value) ? value[0] : value
 }
 
 function el(tag, className = '') {
@@ -810,10 +1358,14 @@ function svgEl(tag, className = '') {
 
 function attrs(node, values) {
   Object.keys(values).forEach(key => {
-    node.setAttribute(key, values[key])
+    if (values[key] !== undefined && values[key] !== null) {
+      node.setAttribute(key, values[key])
+    }
   })
 }
 
 function toTime(value) {
-  return typeof value === 'number' ? value : new Date(value).getTime()
+  if (typeof value === 'number') return value
+  if (value instanceof Date) return value.getTime()
+  return new Date(value).getTime()
 }

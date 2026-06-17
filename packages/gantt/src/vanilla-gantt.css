@@ -24,10 +24,8 @@
 }
 
 .vg-left-header {
-  display: flex;
+  display: grid;
   align-items: center;
-  gap: 10px;
-  padding: 0 10px;
   border-bottom: 1px solid #dbe4e4;
   background: #eef5f5;
   font-size: 13px;
@@ -45,10 +43,8 @@
 }
 
 .vg-row {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 10px 8px;
+  display: grid;
+  align-items: stretch;
   border-bottom: 1px solid #edf1f1;
   background: #fff;
 }
@@ -57,15 +53,71 @@
   background: #fbfdfd;
 }
 
+.vg-table-header-cell,
+.vg-table-cell {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  border-right: 1px solid #edf1f1;
+  overflow: hidden;
+}
+
+.vg-table-header-cell:last-child,
+.vg-table-cell:last-child {
+  border-right: 0;
+}
+
+.vg-table-header-cell {
+  height: 100%;
+  color: #465154;
+  font-weight: 700;
+  padding-right: 14px;
+}
+
+.vg-table-cell {
+  color: #465154;
+  font-size: 13px;
+}
+
+.vg-table-header-content {
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vg-column-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  z-index: 2;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+}
+
+.vg-column-resize-handle:hover {
+  background: rgba(42, 169, 184, 0.18);
+}
+
 .vg-row-name {
   display: flex;
   align-items: center;
   justify-content: flex-start;
+  width: 100%;
   min-height: 18px;
   gap: 4px;
   color: #465154;
   font-size: 13px;
   cursor: default;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .vg-row-name--toggle {
@@ -85,11 +137,10 @@
 
 .vg-row-load {
   display: grid;
-  grid-template-columns: 48px 1fr 34px;
+  grid-template-columns: minmax(28px, 1fr) 34px;
   align-items: center;
-  align-self: stretch;
   gap: 6px;
-  margin-top: 8px;
+  width: 100%;
   color: #96a1a4;
   font-size: 11px;
 }
@@ -272,4 +323,10 @@
   bottom: 3px;
   color: #615939;
   font-size: 11px;
+}
+
+.vg-mark-line-text {
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
 }

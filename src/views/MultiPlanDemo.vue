@@ -3,11 +3,11 @@
     <div class="demo-toolbar">
       <label>
         <span>开始</span>
-        <input v-model="start" type="datetime-local" />
+        <input v-model="options.minDate" type="datetime-local" />
       </label>
       <label>
         <span>结束</span>
-        <input v-model="end" type="datetime-local" />
+        <input v-model="options.maxDate" type="datetime-local" />
       </label>
       <label>
         <span>刻度</span>
@@ -25,139 +25,151 @@
 <script>
 import { VanillaGantt } from '../lib'
 
-const scaleOptions = createScaleOptions()
+const scaleOptions = [
+  { key: '1h', label: '1小时', value: [{ unit: 'day', step: 1, rowHeight: 24 }, { unit: 'hour', step: 1, colWidth: 40, rowHeight: 24 }] },
+  { key: '2h', label: '2小时', value: [{ unit: 'day', step: 1, rowHeight: 24 }, { unit: 'hour', step: 2, colWidth: 64, rowHeight: 24 }] },
+  { key: '4h', label: '4小时', value: [{ unit: 'day', step: 1, rowHeight: 24 }, { unit: 'hour', step: 4, colWidth: 72, rowHeight: 24 }] },
+  { key: 'day', label: '天', value: [{ unit: 'month', step: 1, rowHeight: 24 }, { unit: 'day', step: 1, colWidth: 120, rowHeight: 24 }] },
+  { key: 'week', label: '周', value: [{ unit: 'month', step: 1, rowHeight: 24 }, { unit: 'week', step: 1, colWidth: 180, rowHeight: 24 }] },
+  { key: 'month', label: '月', value: [{ unit: 'year', step: 1, rowHeight: 24 }, { unit: 'month', step: 1, colWidth: 220, rowHeight: 24 }] },
+  { key: 'year', label: '年', value: [{ unit: 'year', step: 1, colWidth: 260, rowHeight: 48 }] }
+]
 
 export default {
   name: 'MultiPlanDemo',
   data() {
     return {
-      rows: [
-        {
-          id: 'heat-group',
-          name: '热处理',
-          type: 'group',
-          expanded: true,
-          height: 132,
-          children: [
-            { id: 'unit-a', name: '机组单元A', load: 92, height: 132 },
-            { id: 'unit-b', name: '机组单元B', load: 76, height: 132 },
-            { id: 'unit-c', name: '机组单元C', load: 58, height: 132 }
+      options: {
+        minDate: '2026-03-30T02:00',
+        maxDate: '2026-03-31T18:00',
+        rowHeight: 132,
+        markLine: {
+          date: '2026-03-30T12:00',
+          style: { lineColor: '#35cce0' }
+        },
+        taskListTable: {
+          tableWidth: 'auto',
+          columns: [
+            { field: 'name', title: '机组单元', width: 150, tree: true },
+            { field: 'load', title: '负载', width: 78 }
           ]
-        }
-      ],
-      tasks: this.createTasks(),
-      blocks: [],
-      links: [],
-      restRanges: [
-        this.rest('rest-1', '2026-03-30T11:40:00', '2026-03-30T12:35:00'),
-        this.rest('rest-2', '2026-03-31T02:10:00', '2026-03-31T03:25:00')
-      ],
-      lanes: [
-        { key: 'plan-1', offset: 8, height: 26 },
-        { key: 'load-1', offset: 39, height: 6 },
-        { key: 'unload-1', offset: 50, height: 6 },
-        { key: 'plan-2', offset: 62, height: 26 },
-        { key: 'load-2', offset: 93, height: 6 },
-        { key: 'unload-2', offset: 104, height: 6 }
-      ],
-      start: '2026-03-30T02:00',
-      end: '2026-03-31T18:00',
+        },
+        timelineHeader: {
+          scales: scaleOptions[1].value
+        },
+        dependency: {
+          links: []
+        },
+        grid: {
+          backgroundRanges: [
+            { id: 'rest-1', startDate: '2026-03-30T11:40:00', endDate: '2026-03-30T12:35:00', fill: '#e4eaea', opacity: 1 },
+            { id: 'rest-2', startDate: '2026-03-31T02:10:00', endDate: '2026-03-31T03:25:00', fill: '#e4eaea', opacity: 1 }
+          ],
+          rowBackgroundRanges: []
+        },
+        taskBar: {
+          lanes: [
+            { key: 'plan-1', offset: 8, height: 26 },
+            { key: 'load-1', offset: 39, height: 6 },
+            { key: 'unload-1', offset: 50, height: 6 },
+            { key: 'plan-2', offset: 62, height: 26 },
+            { key: 'load-2', offset: 93, height: 6 },
+            { key: 'unload-2', offset: 104, height: 6 }
+          ]
+        },
+        records: [
+          {
+            id: 'heat-group',
+            name: '热处理',
+            type: 'group',
+            expanded: true,
+            height: 132,
+            children: [
+              {
+                id: 'unit-a',
+                name: '机组单元A',
+                load: 92,
+                height: 132,
+                tasks: [
+                  { id: 'p1', lane: 'plan-1', title: '产品图号001', subtitle: '144', startDate: '2026-03-30T06:00:00', endDate: '2026-03-30T12:00:00', striped: true },
+                  { id: 'p1-load', lane: 'load-1', title: '上料', subtitle: '产品图号001', startDate: '2026-03-30T04:10:00', endDate: '2026-03-30T05:40:00', status: 'load' },
+                  { id: 'p1-unload', lane: 'unload-1', title: '下料', subtitle: '产品图号001', startDate: '2026-03-30T12:20:00', endDate: '2026-03-30T14:00:00', status: 'unload' },
+                  { id: 'p2', lane: 'plan-2', title: '产品图号002', subtitle: '80', startDate: '2026-03-30T08:30:00', endDate: '2026-03-30T15:30:00', status: 'planned' },
+                  { id: 'p2-load', lane: 'load-2', title: '上料', subtitle: '产品图号002', startDate: '2026-03-30T06:40:00', endDate: '2026-03-30T08:10:00', status: 'load' },
+                  { id: 'p2-unload', lane: 'unload-2', title: '下料', subtitle: '产品图号002', startDate: '2026-03-30T15:50:00', endDate: '2026-03-30T17:30:00', status: 'unload' },
+                  { id: 'p3', lane: 'plan-1', title: '产品图号003', subtitle: '120', startDate: '2026-03-31T00:30:00', endDate: '2026-03-31T08:00:00' },
+                  { id: 'p3-load', lane: 'load-1', title: '上料', subtitle: '产品图号003', startDate: '2026-03-30T22:40:00', endDate: '2026-03-31T00:10:00', status: 'load' },
+                  { id: 'p3-unload', lane: 'unload-1', title: '下料', subtitle: '产品图号003', startDate: '2026-03-31T08:20:00', endDate: '2026-03-31T10:00:00', status: 'unload' },
+                  { id: 'p4', lane: 'plan-2', title: '产品图号004', subtitle: '96', startDate: '2026-03-31T03:00:00', endDate: '2026-03-31T12:30:00', status: 'blue' },
+                  { id: 'p4-load', lane: 'load-2', title: '上料', subtitle: '产品图号004', startDate: '2026-03-31T01:10:00', endDate: '2026-03-31T02:40:00', status: 'load' },
+                  { id: 'p4-unload', lane: 'unload-2', title: '下料', subtitle: '产品图号004', startDate: '2026-03-31T12:50:00', endDate: '2026-03-31T14:30:00', status: 'unload' }
+                ]
+              },
+              {
+                id: 'unit-b',
+                name: '机组单元B',
+                load: 76,
+                height: 132,
+                tasks: [
+                  { id: 'p5', lane: 'plan-1', title: '产品图号005', subtitle: '144', startDate: '2026-03-30T05:00:00', endDate: '2026-03-30T11:45:00', status: 'planned', striped: true },
+                  { id: 'p5-load', lane: 'load-1', title: '上料', subtitle: '产品图号005', startDate: '2026-03-30T03:10:00', endDate: '2026-03-30T04:40:00', status: 'load' },
+                  { id: 'p5-unload', lane: 'unload-1', title: '下料', subtitle: '产品图号005', startDate: '2026-03-30T12:05:00', endDate: '2026-03-30T13:45:00', status: 'unload' },
+                  { id: 'p6', lane: 'plan-2', title: '产品图号006', subtitle: '100', startDate: '2026-03-30T13:00:00', endDate: '2026-03-30T22:30:00' },
+                  { id: 'p6-load', lane: 'load-2', title: '上料', subtitle: '产品图号006', startDate: '2026-03-30T11:10:00', endDate: '2026-03-30T12:40:00', status: 'load' },
+                  { id: 'p6-unload', lane: 'unload-2', title: '下料', subtitle: '产品图号006', startDate: '2026-03-30T22:50:00', endDate: '2026-03-31T00:30:00', status: 'unload' },
+                  { id: 'p7', lane: 'plan-1', title: '产品图号007', subtitle: '72', startDate: '2026-03-31T01:30:00', endDate: '2026-03-31T07:10:00', status: 'selected' },
+                  { id: 'p7-load', lane: 'load-1', title: '上料', subtitle: '产品图号007', startDate: '2026-03-30T23:40:00', endDate: '2026-03-31T01:10:00', status: 'load' },
+                  { id: 'p7-unload', lane: 'unload-1', title: '下料', subtitle: '产品图号007', startDate: '2026-03-31T07:30:00', endDate: '2026-03-31T09:10:00', status: 'unload' },
+                  { id: 'p8', lane: 'plan-2', title: '产品图号008', subtitle: '88', startDate: '2026-03-31T07:30:00', endDate: '2026-03-31T15:00:00', status: 'warning' },
+                  { id: 'p8-load', lane: 'load-2', title: '上料', subtitle: '产品图号008', startDate: '2026-03-31T05:40:00', endDate: '2026-03-31T07:10:00', status: 'load' },
+                  { id: 'p8-unload', lane: 'unload-2', title: '下料', subtitle: '产品图号008', startDate: '2026-03-31T15:20:00', endDate: '2026-03-31T17:00:00', status: 'unload' }
+                ]
+              },
+              {
+                id: 'unit-c',
+                name: '机组单元C',
+                load: 58,
+                height: 132,
+                tasks: [
+                  { id: 'p9', lane: 'plan-1', title: '产品图号009', subtitle: '60', startDate: '2026-03-30T07:20:00', endDate: '2026-03-30T16:00:00' },
+                  { id: 'p9-load', lane: 'load-1', title: '上料', subtitle: '产品图号009', startDate: '2026-03-30T05:30:00', endDate: '2026-03-30T07:00:00', status: 'load' },
+                  { id: 'p9-unload', lane: 'unload-1', title: '下料', subtitle: '产品图号009', startDate: '2026-03-30T16:20:00', endDate: '2026-03-30T18:00:00', status: 'unload' },
+                  { id: 'p10', lane: 'plan-2', title: '产品图号010', subtitle: '120', startDate: '2026-03-30T10:40:00', endDate: '2026-03-30T18:20:00', status: 'planned' },
+                  { id: 'p10-load', lane: 'load-2', title: '上料', subtitle: '产品图号010', startDate: '2026-03-30T08:50:00', endDate: '2026-03-30T10:20:00', status: 'load' },
+                  { id: 'p10-unload', lane: 'unload-2', title: '下料', subtitle: '产品图号010', startDate: '2026-03-30T18:40:00', endDate: '2026-03-30T20:20:00', status: 'unload' },
+                  { id: 'p11', lane: 'plan-1', title: '产品图号011', subtitle: '144', startDate: '2026-03-31T02:40:00', endDate: '2026-03-31T11:20:00', status: 'blue' },
+                  { id: 'p11-load', lane: 'load-1', title: '上料', subtitle: '产品图号011', startDate: '2026-03-31T00:50:00', endDate: '2026-03-31T02:20:00', status: 'load' },
+                  { id: 'p11-unload', lane: 'unload-1', title: '下料', subtitle: '产品图号011', startDate: '2026-03-31T11:40:00', endDate: '2026-03-31T13:20:00', status: 'unload' }
+                ]
+              }
+            ]
+          }
+        ]
+      },
       scaleKey: '2h',
       scaleOptions,
       gantt: null
     }
   },
-  computed: {
-    timeScale() {
-      return this.scaleOptions.find(scale => scale.key === this.scaleKey).value
+  watch: {
+    'options.minDate': 'syncGantt',
+    'options.maxDate': 'syncGantt',
+    scaleKey(value) {
+      this.options.timelineHeader.scales = this.scaleOptions.find(scale => scale.key === value).value
+      this.syncGantt()
     }
   },
-  watch: {
-    start: 'syncGantt',
-    end: 'syncGantt',
-    scaleKey: 'syncGantt'
-  },
   mounted() {
-    this.gantt = new VanillaGantt(this.$refs.gantt, this.createOptions())
+    this.gantt = new VanillaGantt(this.$refs.gantt, this.options)
   },
   beforeDestroy() {
     if (this.gantt) this.gantt.destroy()
   },
   methods: {
-    createOptions() {
-      return {
-        rows: this.rows,
-        tasks: this.tasks,
-        blocks: this.blocks,
-        links: this.links,
-        restRanges: this.restRanges,
-        start: this.start,
-        end: this.end,
-        now: '2026-03-30T12:00',
-        timeScale: this.timeScale,
-        rowHeight: 132,
-        lanes: this.lanes
-      }
-    },
     syncGantt() {
-      if (this.gantt) this.gantt.setOptions(this.createOptions())
-    },
-    createTasks() {
-      const plans = [
-        this.plan('p1', 'unit-a', 'plan-1', '产品图号001', '144', '2026-03-30T06:00:00', '2026-03-30T12:00:00', { striped: true }),
-        this.plan('p2', 'unit-a', 'plan-2', '产品图号002', '80', '2026-03-30T08:30:00', '2026-03-30T15:30:00', { status: 'planned' }),
-        this.plan('p3', 'unit-a', 'plan-1', '产品图号003', '120', '2026-03-31T00:30:00', '2026-03-31T08:00:00'),
-        this.plan('p4', 'unit-a', 'plan-2', '产品图号004', '96', '2026-03-31T03:00:00', '2026-03-31T12:30:00', { status: 'blue' }),
-        this.plan('p5', 'unit-b', 'plan-1', '产品图号005', '144', '2026-03-30T05:00:00', '2026-03-30T11:45:00', { status: 'planned', striped: true }),
-        this.plan('p6', 'unit-b', 'plan-2', '产品图号006', '100', '2026-03-30T13:00:00', '2026-03-30T22:30:00'),
-        this.plan('p7', 'unit-b', 'plan-1', '产品图号007', '72', '2026-03-31T01:30:00', '2026-03-31T07:10:00', { status: 'selected' }),
-        this.plan('p8', 'unit-b', 'plan-2', '产品图号008', '88', '2026-03-31T07:30:00', '2026-03-31T15:00:00', { status: 'warning' }),
-        this.plan('p9', 'unit-c', 'plan-1', '产品图号009', '60', '2026-03-30T07:20:00', '2026-03-30T16:00:00'),
-        this.plan('p10', 'unit-c', 'plan-2', '产品图号010', '120', '2026-03-30T10:40:00', '2026-03-30T18:20:00', { status: 'planned' }),
-        this.plan('p11', 'unit-c', 'plan-1', '产品图号011', '144', '2026-03-31T02:40:00', '2026-03-31T11:20:00', { status: 'blue' })
-      ]
-
-      return plans.concat(plans.flatMap(plan => this.handlingTasks(plan)))
-    },
-    plan(id, rowId, lane, title, subtitle, start, end, extra = {}) {
-      return { id, rowId, lane, title, subtitle, start, end, ...extra }
-    },
-    handlingTasks(plan) {
-      const index = plan.lane.split('-')[1]
-      return [
-        this.plan(`${plan.id}-load`, plan.rowId, `load-${index}`, '上料', plan.title, this.addMinutes(plan.start, -110), this.addMinutes(plan.start, -20), { status: 'load' }),
-        this.plan(`${plan.id}-unload`, plan.rowId, `unload-${index}`, '下料', plan.title, this.addMinutes(plan.end, 20), this.addMinutes(plan.end, 120), { status: 'unload' })
-      ]
-    },
-    addMinutes(value, minutes) {
-      const date = new Date(value)
-      date.setMinutes(date.getMinutes() + minutes)
-      return this.formatDateTime(date)
-    },
-    formatDateTime(date) {
-      const year = date.getFullYear()
-      const month = String(date.getMonth() + 1).padStart(2, '0')
-      const day = String(date.getDate()).padStart(2, '0')
-      const hour = String(date.getHours()).padStart(2, '0')
-      const minute = String(date.getMinutes()).padStart(2, '0')
-      return `${year}-${month}-${day}T${hour}:${minute}:00`
-    },
-    rest(id, start, end) {
-      return { id, start, end, fill: '#e4eaea', opacity: 1 }
+      if (this.gantt) this.gantt.setOptions(this.options)
     }
   }
-}
-
-function createScaleOptions() {
-  return [
-    { key: '1h', label: '1小时', value: { unit: 'hour', step: 1, pxPerUnit: 40, topUnit: 'day' } },
-    { key: '2h', label: '2小时', value: { unit: 'hour', step: 2, pxPerUnit: 64, topUnit: 'day' } },
-    { key: '4h', label: '4小时', value: { unit: 'hour', step: 4, pxPerUnit: 72, topUnit: 'day' } },
-    { key: 'day', label: '天', value: { unit: 'day', step: 1, pxPerUnit: 120, topUnit: 'day' } },
-    { key: 'week', label: '周', value: { unit: 'week', step: 1, pxPerUnit: 180, topUnit: 'month' } },
-    { key: 'month', label: '月', value: { unit: 'month', step: 1, pxPerUnit: 220, topUnit: 'year' } },
-    { key: 'year', label: '年', value: { unit: 'year', step: 1, pxPerUnit: 260, topUnit: 'year' } }
-  ]
 }
 </script>
 

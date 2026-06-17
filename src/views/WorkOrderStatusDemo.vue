@@ -3,11 +3,11 @@
     <div class="demo-toolbar">
       <label>
         <span>开始</span>
-        <input v-model="start" type="datetime-local" />
+        <input v-model="options.minDate" type="datetime-local" />
       </label>
       <label>
         <span>结束</span>
-        <input v-model="end" type="datetime-local" />
+        <input v-model="options.maxDate" type="datetime-local" />
       </label>
       <label>
         <span>刻度</span>
@@ -45,42 +45,161 @@
 <script>
 import { VanillaGantt } from '../lib'
 
-const scaleOptions = createScaleOptions()
+const scaleOptions = [
+  { key: '1h', label: '1小时', value: [{ unit: 'day', step: 1, rowHeight: 24 }, { unit: 'hour', step: 1, colWidth: 40, rowHeight: 24 }] },
+  { key: '2h', label: '2小时', value: [{ unit: 'day', step: 1, rowHeight: 24 }, { unit: 'hour', step: 2, colWidth: 64, rowHeight: 24 }] },
+  { key: '4h', label: '4小时', value: [{ unit: 'day', step: 1, rowHeight: 24 }, { unit: 'hour', step: 4, colWidth: 72, rowHeight: 24 }] },
+  { key: 'day', label: '天', value: [{ unit: 'month', step: 1, rowHeight: 24 }, { unit: 'day', step: 1, colWidth: 120, rowHeight: 24 }] },
+  { key: 'week', label: '周', value: [{ unit: 'month', step: 1, rowHeight: 24 }, { unit: 'week', step: 1, colWidth: 180, rowHeight: 24 }] },
+  { key: 'month', label: '月', value: [{ unit: 'year', step: 1, rowHeight: 24 }, { unit: 'month', step: 1, colWidth: 220, rowHeight: 24 }] },
+  { key: 'year', label: '年', value: [{ unit: 'year', step: 1, colWidth: 260, rowHeight: 48 }] }
+]
+
+function escapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
 
 export default {
   name: 'WorkOrderStatusDemo',
   data() {
-    const rows = this.createRows()
-    const tasks = this.createTasks()
-
     return {
-      rows,
-      tasks,
-      blocks: this.createBlocks(),
-      links: [
-        {
-          id: 'delay-link',
-          fromRowId: 'heat-2',
-          toRowId: 'heat-2',
-          fromTime: '2026-04-01T00:50:00',
-          toTime: '2026-04-01T06:10:00',
-          fromY: 46,
-          toY: 46,
-          color: '#40c51b',
-          dashed: true
-        }
-      ],
-      restRanges: [
-        this.rest('stop-1', '2026-03-30T19:00:00', '2026-03-31T05:00:00', '#fdeeee'),
-        this.rest('freeze-1', '2026-03-30T06:30:00', '2026-03-30T12:30:00', '#ececec')
-      ],
-      lanes: [
-        { key: 'plan', offset: 8, height: 58 },
-        { key: 'load', offset: 70, height: 6 },
-        { key: 'unload', offset: 82, height: 6 }
-      ],
-      start: '2026-03-30T02:00',
-      end: '2026-04-01T08:00',
+      options: {
+        minDate: '2026-03-30T02:00',
+        maxDate: '2026-04-01T08:00',
+        rowHeight: 92,
+        markLine: {
+          date: '2026-03-30T12:00',
+          style: { lineColor: '#35cce0' }
+        },
+        taskListTable: {
+          tableWidth: 'auto',
+          columns: [
+            { field: 'name', title: '资源', width: 140, minWidth: 100, tree: true },
+            { title: '工序', width: 78, minWidth: 64, valueGetter: this.getRecordStage },
+            { title: '任务数', width: 70, minWidth: 60, align: 'right', headerAlign: 'right', valueGetter: this.getRecordTaskCount },
+            { title: '状态', width: 86, minWidth: 72, valueGetter: this.getRecordStatus, renderCell: this.renderRecordStatus }
+          ]
+        },
+        timelineHeader: {
+          scales: scaleOptions[1].value
+        },
+        taskBar: {
+          customLayout: this.renderTask,
+          lanes: [
+            { key: 'plan', offset: 8, height: 58 },
+            { key: 'load', offset: 70, height: 6 },
+            { key: 'unload', offset: 82, height: 6 }
+          ]
+        },
+        dependency: {
+          links: [
+            { id: 'delay-link', type: 'finish_to_start', linkedFromTaskKey: 'wo-5', linkedToTaskKey: 'wo-6', color: '#40c51b', dashed: true }
+          ]
+        },
+        grid: {
+          backgroundRanges: [
+            { id: 'stop-1', startDate: '2026-03-30T19:00:00', endDate: '2026-03-31T05:00:00', fill: '#fdeeee', opacity: 1 },
+            { id: 'freeze-1', startDate: '2026-03-30T06:30:00', endDate: '2026-03-30T12:30:00', fill: '#ececec', opacity: 1 }
+          ],
+          rowBackgroundRanges: [
+            { id: 'shift-heat', recordKey: 'heat', startDate: '2026-03-30T02:00:00', endDate: '2026-04-01T08:00:00', fill: '#ffe2a8', opacity: 0.82, offsetY: 8, height: 32 },
+            { id: 'shift-outside', recordKey: 'outside', startDate: '2026-03-30T02:00:00', endDate: '2026-04-01T08:00:00', fill: '#cfe1ff', opacity: 0.82, offsetY: 8, height: 32 }
+          ]
+        },
+        records: [
+          {
+            id: 'heat',
+            name: '热处理',
+            type: 'group',
+            expanded: true,
+            height: 48,
+            children: [
+              {
+                id: 'heat-1',
+                name: '热处理炉1',
+                height: 92,
+                tasks: [
+                  { id: 'wo-1', lane: 'plan', title: '产品图号001', subtitle: '144', startDate: '2026-03-30T02:10:00', endDate: '2026-03-30T10:00:00', completed: true, workStatus: 'progress-normal' },
+                  { id: 'wo-1-load', lane: 'load', title: 'load-done', startDate: '2026-03-30T02:00:00', endDate: '2026-03-30T03:00:00', status: 'load-done', logistics: true },
+                  { id: 'wo-1-unload', lane: 'unload', title: 'unload-done', startDate: '2026-03-30T10:20:00', endDate: '2026-03-30T12:30:00', status: 'unload-done', logistics: true },
+                  { id: 'wo-2', lane: 'plan', title: '图号001', subtitle: '144', startDate: '2026-03-30T10:30:00', endDate: '2026-03-31T06:30:00', status: 'planned', progress: 50, workStatus: 'progress-normal' },
+                  { id: 'wo-2-load', lane: 'load', title: 'load-running', startDate: '2026-03-30T08:00:00', endDate: '2026-03-30T10:10:00', status: 'load-running', logistics: true },
+                  { id: 'wo-2-unload', lane: 'unload', title: 'unload-running', startDate: '2026-03-31T06:50:00', endDate: '2026-03-31T09:00:00', status: 'unload-running', logistics: true },
+                  { id: 'wo-3', lane: 'plan', title: '图号001', subtitle: '144', startDate: '2026-03-31T07:10:00', endDate: '2026-04-01T07:40:00', status: 'planned', workStatus: 'progress-normal' },
+                  { id: 'wo-3-load', lane: 'load', title: 'load-waiting', startDate: '2026-03-31T04:40:00', endDate: '2026-03-31T06:50:00', status: 'load-waiting', logistics: true },
+                  { id: 'wo-3-unload', lane: 'unload', title: 'unload-waiting', startDate: '2026-04-01T07:55:00', endDate: '2026-04-01T08:00:00', status: 'unload-waiting', logistics: true }
+                ]
+              },
+              {
+                id: 'heat-2',
+                name: '热处理炉1',
+                height: 92,
+                tasks: [
+                  { id: 'wo-4', lane: 'plan', title: '产品图号001', subtitle: '144', startDate: '2026-03-30T02:00:00', endDate: '2026-03-30T07:30:00', status: 'blue', completed: true, workStatus: 'not-started' },
+                  { id: 'wo-5', lane: 'plan', title: '图号001', subtitle: '144', startDate: '2026-03-30T08:20:00', endDate: '2026-03-31T03:10:00', status: 'purple', workStatus: 'progress-normal' },
+                  { id: 'wo-5-load', lane: 'load', title: 'load-running', startDate: '2026-03-30T05:50:00', endDate: '2026-03-30T08:00:00', status: 'load-running', logistics: true },
+                  { id: 'wo-5-unload', lane: 'unload', title: 'unload-running', startDate: '2026-03-31T03:30:00', endDate: '2026-03-31T05:40:00', status: 'unload-running', logistics: true },
+                  { id: 'wo-6', lane: 'plan', title: '图号001', subtitle: '144', startDate: '2026-03-31T05:10:00', endDate: '2026-04-01T07:30:00', status: 'pink', workStatus: 'slight-delay' },
+                  { id: 'wo-6-load', lane: 'load', title: 'load-running', startDate: '2026-03-31T02:40:00', endDate: '2026-03-31T04:50:00', status: 'load-running', logistics: true },
+                  { id: 'wo-6-unload', lane: 'unload', title: 'unload-waiting', startDate: '2026-04-01T07:50:00', endDate: '2026-04-01T08:00:00', status: 'unload-waiting', logistics: true }
+                ]
+              },
+              {
+                id: 'heat-3',
+                name: '热处理炉1',
+                height: 92,
+                tasks: [
+                  { id: 'wo-7', lane: 'plan', title: '产品图号001', subtitle: '144', startDate: '2026-03-30T02:00:00', endDate: '2026-03-30T08:30:00', status: 'planned', completed: true, predecessorIncomplete: true, workStatus: 'progress-normal' },
+                  { id: 'wo-8', lane: 'plan', title: '图号001', subtitle: '144', startDate: '2026-03-30T08:20:00', endDate: '2026-03-31T03:10:00', status: 'planned', workStatus: 'progress-normal' },
+                  { id: 'wo-9', lane: 'plan', title: '图号001', subtitle: '144', startDate: '2026-03-31T05:10:00', endDate: '2026-04-01T07:30:00', status: 'planned', workStatus: 'severe-delay' }
+                ]
+              },
+              {
+                id: 'heat-4',
+                name: '热处理炉1',
+                height: 92,
+                tasks: [
+                  { id: 'wo-10', lane: 'plan', title: '产品图号001', subtitle: '144', startDate: '2026-03-30T02:00:00', endDate: '2026-03-30T10:00:00', completed: true, workStatus: 'progress-normal' },
+                  { id: 'wo-11', lane: 'plan', title: '图号001', subtitle: '144', startDate: '2026-03-30T10:30:00', endDate: '2026-03-31T06:30:00', status: 'planned', replan: 'before', workStatus: 'progress-normal' },
+                  { id: 'wo-12', lane: 'plan', title: '图号001', subtitle: '144', startDate: '2026-03-31T07:10:00', endDate: '2026-04-01T07:40:00', status: 'planned', replan: 'after', workStatus: 'progress-normal' }
+                ]
+              }
+            ]
+          },
+          {
+            id: 'outside',
+            name: '外协加工',
+            type: 'group',
+            expanded: true,
+            height: 48,
+            children: [
+              {
+                id: 'outside-1',
+                name: '外协加工1',
+                height: 92,
+                tasks: [
+                  { id: 'wo-13', lane: 'plan', title: '外协图号001', subtitle: '144', startDate: '2026-03-30T02:20:00', endDate: '2026-03-31T10:00:00', status: 'blue', predecessorIncomplete: true, workStatus: 'progress-normal' },
+                  { id: 'wo-14', lane: 'plan', title: '外协图号002', subtitle: '144', startDate: '2026-03-31T10:00:00', endDate: '2026-04-01T08:00:00', status: 'purple', workStatus: 'progress-normal' }
+                ]
+              },
+              {
+                id: 'outside-2',
+                name: '外协加工2',
+                height: 92,
+                tasks: [
+                  { id: 'wo-15', lane: 'plan', title: '外协图号003', subtitle: '144', startDate: '2026-03-30T04:30:00', endDate: '2026-03-31T02:00:00', status: 'planned', workStatus: 'progress-normal' },
+                  { id: 'wo-16', lane: 'plan', title: '外协图号004', subtitle: '144', startDate: '2026-03-31T03:00:00', endDate: '2026-04-01T06:30:00', status: 'pink', workStatus: 'slight-delay' }
+                ]
+              }
+            ]
+          }
+        ]
+      },
       scaleKey: '2h',
       scaleOptions,
       gantt: null,
@@ -109,106 +228,49 @@ export default {
       ]
     }
   },
-  computed: {
-    timeScale() {
-      return this.scaleOptions.find(scale => scale.key === this.scaleKey).value
+  watch: {
+    'options.minDate': 'syncGantt',
+    'options.maxDate': 'syncGantt',
+    scaleKey(value) {
+      this.options.timelineHeader.scales = this.scaleOptions.find(scale => scale.key === value).value
+      this.syncGantt()
     }
   },
-  watch: {
-    start: 'syncGantt',
-    end: 'syncGantt',
-    scaleKey: 'syncGantt'
-  },
   mounted() {
-    this.gantt = new VanillaGantt(this.$refs.gantt, this.createOptions())
+    this.gantt = new VanillaGantt(this.$refs.gantt, this.options)
   },
   beforeDestroy() {
     if (this.gantt) this.gantt.destroy()
   },
   methods: {
-    createOptions() {
-      return {
-        rows: this.rows,
-        tasks: this.tasks,
-        blocks: this.blocks,
-        links: this.links,
-        restRanges: this.restRanges,
-        start: this.start,
-        end: this.end,
-        now: '2026-03-30T12:00',
-        timeScale: this.timeScale,
-        rowHeight: 92,
-        leftWidth: 150,
-        lanes: this.lanes,
-        renderTask: this.renderTask
-      }
-    },
     syncGantt() {
-      if (this.gantt) this.gantt.setOptions(this.createOptions())
+      if (this.gantt) this.gantt.setOptions(this.options)
     },
-    createRows() {
-      return [
-        {
-          id: 'heat',
-          name: '热处理',
-          type: 'group',
-          expanded: true,
-          height: 48,
-          children: [
-            { id: 'heat-1', name: '热处理炉1', height: 92 },
-            { id: 'heat-2', name: '热处理炉1', height: 92 },
-            { id: 'heat-3', name: '热处理炉1', height: 92 },
-            { id: 'heat-4', name: '热处理炉1', height: 92 }
-          ]
-        },
-        {
-          id: 'outside',
-          name: '外协加工',
-          type: 'group',
-          expanded: true,
-          height: 48,
-          children: [
-            { id: 'outside-1', name: '外协加工1', height: 92 },
-            { id: 'outside-2', name: '外协加工2', height: 92 }
-          ]
-        }
-      ]
+    getRecordStage({ row }) {
+      if (row.type === 'group') return row.name || ''
+      if (String(row.id).startsWith('outside')) return '外协'
+      if (String(row.id).startsWith('heat')) return '热处理'
+      return ''
     },
-    createTasks() {
-      const plans = [
-        this.plan('wo-1', 'heat-1', '产品图号001', '144', '2026-03-30T02:10:00', '2026-03-30T10:00:00', { completed: true }),
-        this.plan('wo-2', 'heat-1', '图号001', '144', '2026-03-30T10:30:00', '2026-03-31T06:30:00', { status: 'planned', progress: 50 }),
-        this.plan('wo-3', 'heat-1', '图号001', '144', '2026-03-31T07:10:00', '2026-04-01T07:40:00', { status: 'planned' }),
-
-        this.plan('wo-4', 'heat-2', '产品图号001', '144', '2026-03-30T02:00:00', '2026-03-30T07:30:00', { status: 'blue', completed: true, workStatus: 'not-started' }),
-        this.plan('wo-5', 'heat-2', '图号001', '144', '2026-03-30T08:20:00', '2026-03-31T03:10:00', { status: 'purple', workStatus: 'progress-normal' }),
-        this.plan('wo-6', 'heat-2', '图号001', '144', '2026-03-31T05:10:00', '2026-04-01T07:30:00', { status: 'pink', workStatus: 'slight-delay' }),
-
-        this.plan('wo-7', 'heat-3', '产品图号001', '144', '2026-03-30T02:00:00', '2026-03-30T08:30:00', { status: 'planned', completed: true, predecessorIncomplete: true }),
-        this.plan('wo-8', 'heat-3', '图号001', '144', '2026-03-30T08:20:00', '2026-03-31T03:10:00', { status: 'planned', workStatus: 'progress-normal' }),
-        this.plan('wo-9', 'heat-3', '图号001', '144', '2026-03-31T05:10:00', '2026-04-01T07:30:00', { status: 'planned', workStatus: 'severe-delay' }),
-
-        this.plan('wo-10', 'heat-4', '产品图号001', '144', '2026-03-30T02:00:00', '2026-03-30T10:00:00', { completed: true }),
-        this.plan('wo-11', 'heat-4', '图号001', '144', '2026-03-30T10:30:00', '2026-03-31T06:30:00', { status: 'planned', replan: 'before' }),
-        this.plan('wo-12', 'heat-4', '图号001', '144', '2026-03-31T07:10:00', '2026-04-01T07:40:00', { status: 'planned', replan: 'after' }),
-
-        this.plan('wo-13', 'outside-1', '外协图号001', '144', '2026-03-30T02:20:00', '2026-03-31T10:00:00', { status: 'blue', predecessorIncomplete: true }),
-        this.plan('wo-14', 'outside-1', '外协图号002', '144', '2026-03-31T10:00:00', '2026-04-01T08:00:00', { status: 'purple' }),
-        this.plan('wo-15', 'outside-2', '外协图号003', '144', '2026-03-30T04:30:00', '2026-03-31T02:00:00', { status: 'planned' }),
-        this.plan('wo-16', 'outside-2', '外协图号004', '144', '2026-03-31T03:00:00', '2026-04-01T06:30:00', { status: 'pink' })
-      ]
-
-      return plans.concat(plans.flatMap(plan => this.logistics(plan)))
+    getRecordTaskCount({ row }) {
+      if (!row.tasks || !row.tasks.length) return ''
+      return row.tasks.filter(task => !task.logistics).length
     },
-    createBlocks() {
-      return [
-        this.block('shift-heat', 'heat', '2026-03-30T02:00:00', '2026-04-01T08:00:00', '#ffe2a8', 0.82, 8, 32),
-        this.block('shift-outside', 'outside', '2026-03-30T02:00:00', '2026-04-01T08:00:00', '#cfe1ff', 0.82, 8, 32)
-      ]
+    getRecordStatus({ row }) {
+      const tasks = row.tasks || []
+      if (!tasks.length) return row.children ? '分组' : ''
+      if (tasks.some(task => task.workStatus === 'severe-delay')) return '严重滞后'
+      if (tasks.some(task => task.workStatus === 'slight-delay')) return '轻微滞后'
+      if (tasks.every(task => task.completed)) return '已完成'
+      return '正常'
+    },
+    renderRecordStatus({ value }) {
+      if (!value) return ''
+      const className = `record-status record-status--${String(value).replace(/\s+/g, '-')}`
+      return `<span class="${escapeHtml(className)}">${escapeHtml(value)}</span>`
     },
     renderTask({ task }) {
-      const node = document.createElement('div')
-      node.className = [
+      const className = [
         'work-task',
         `work-task--${task.status || 'normal'}`,
         `work-task--${task.workStatus || 'progress-normal'}`,
@@ -220,119 +282,26 @@ export default {
         task.parentAggregate ? 'work-task--aggregate' : ''
       ].filter(Boolean).join(' ')
 
-      if (task.logistics) return node
-
-      const dot = document.createElement('span')
-      dot.className = 'work-task-dot'
-      const title = document.createElement('div')
-      title.className = 'work-task-title'
-      title.textContent = task.title
-      const meta = document.createElement('div')
-      meta.className = 'work-task-meta'
-      meta.textContent = task.subtitle || ''
-
-      if (task.progress !== undefined) {
-        const progressText = document.createElement('span')
-        progressText.textContent = `（${task.progress}%）`
-        meta.append(progressText)
+      if (task.logistics) {
+        return `<div class="${escapeHtml(className)}"></div>`
       }
 
-      node.append(dot, title, meta)
+      const progressWidth = Math.max(0, Math.min(100, Number(task.progress) || 0))
+      const progressText = task.progress !== undefined ? `<span>（${escapeHtml(task.progress)}%）</span>` : ''
+      const progressBar = task.progress !== undefined
+        ? `<div class="work-task-progress"><i style="width:${progressWidth}%"></i></div>`
+        : ''
 
-      if (task.progress !== undefined) {
-        const progress = document.createElement('div')
-        progress.className = 'work-task-progress'
-        const bar = document.createElement('i')
-        bar.style.width = `${task.progress}%`
-        progress.append(bar)
-        node.append(progress)
-      }
-
-      return node
-    },
-    plan(id, rowId, title, subtitle, start, end, extra = {}) {
-      return {
-        id,
-        rowId,
-        lane: 'plan',
-        title,
-        subtitle,
-        start,
-        end,
-        progress: extra.progress,
-        workStatus: extra.workStatus || 'progress-normal',
-        ...extra
-      }
-    },
-    logistics(plan) {
-      const loadStatus = plan.completed ? 'load-done' : plan.workStatus === 'severe-delay' ? 'load-waiting' : 'load-running'
-      const unloadStatus = plan.completed ? 'unload-done' : plan.workStatus === 'slight-delay' ? 'unload-waiting' : 'unload-running'
-
-      return [
-        this.logistic(`${plan.id}-load`, plan.rowId, 'load', this.addMinutes(plan.start, -150), this.addMinutes(plan.start, -20), loadStatus),
-        this.logistic(`${plan.id}-unload`, plan.rowId, 'unload', this.addMinutes(plan.end, 20), this.addMinutes(plan.end, 150), unloadStatus)
-      ]
-    },
-    logistic(id, rowId, lane, start, end, status) {
-      return {
-        id,
-        rowId,
-        lane,
-        title: status,
-        subtitle: '',
-        start,
-        end,
-        status,
-        logistics: true
-      }
-    },
-    block(id, rowId, start, end, fill, opacity, offsetY, height) {
-      return {
-        id,
-        rowId,
-        start,
-        end,
-        fill,
-        opacity,
-        offsetY,
-        height
-      }
-    },
-    rest(id, start, end, fill) {
-      return {
-        id,
-        start,
-        end,
-        fill,
-        opacity: 1
-      }
-    },
-    addMinutes(value, minutes) {
-      const date = new Date(value)
-      date.setMinutes(date.getMinutes() + minutes)
-      return this.formatDateTime(date)
-    },
-    formatDateTime(date) {
-      const year = date.getFullYear()
-      const month = String(date.getMonth() + 1).padStart(2, '0')
-      const day = String(date.getDate()).padStart(2, '0')
-      const hour = String(date.getHours()).padStart(2, '0')
-      const minute = String(date.getMinutes()).padStart(2, '0')
-      return `${year}-${month}-${day}T${hour}:${minute}:00`
+      return `
+        <div class="${escapeHtml(className)}">
+          <span class="work-task-dot"></span>
+          <div class="work-task-title">${escapeHtml(task.title)}</div>
+          <div class="work-task-meta">${escapeHtml(task.subtitle)}${progressText}</div>
+          ${progressBar}
+        </div>
+      `
     }
   }
-}
-
-function createScaleOptions() {
-  return [
-    { key: '1h', label: '1小时', value: { unit: 'hour', step: 1, pxPerUnit: 40, topUnit: 'day' } },
-    { key: '2h', label: '2小时', value: { unit: 'hour', step: 2, pxPerUnit: 64, topUnit: 'day' } },
-    { key: '4h', label: '4小时', value: { unit: 'hour', step: 4, pxPerUnit: 72, topUnit: 'day' } },
-    { key: 'day', label: '天', value: { unit: 'day', step: 1, pxPerUnit: 120, topUnit: 'day' } },
-    { key: 'week', label: '周', value: { unit: 'week', step: 1, pxPerUnit: 180, topUnit: 'month' } },
-    { key: 'month', label: '月', value: { unit: 'month', step: 1, pxPerUnit: 220, topUnit: 'year' } },
-    { key: 'year', label: '年', value: { unit: 'year', step: 1, pxPerUnit: 260, topUnit: 'year' } }
-  ]
 }
 </script>
 
@@ -424,6 +393,42 @@ function createScaleOptions() {
 .chart-wrap {
   min-height: 0;
   flex: 1;
+}
+
+.record-status {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  max-width: 100%;
+  padding: 0 6px;
+  border-radius: 3px;
+  background: #edf6f5;
+  color: #53706c;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.record-status--正常,
+.record-status--已完成 {
+  background: #e8f7e9;
+  color: #2e8a3d;
+}
+
+.record-status--轻微滞后 {
+  background: #fff3dc;
+  color: #a76709;
+}
+
+.record-status--严重滞后 {
+  background: #ffe8ea;
+  color: #c9333f;
+}
+
+.record-status--分组 {
+  background: #eef3f4;
+  color: #6d7b7f;
 }
 
 .work-task {
