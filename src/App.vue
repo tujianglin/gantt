@@ -2,6 +2,7 @@
   <div id="app">
     <aside class="app-nav">
       <div class="brand">SVG Gantt</div>
+      <router-link exact to="/">首页</router-link>
       <router-link to="/basic">基础示例</router-link>
       <router-link to="/table-columns">表格列</router-link>
       <router-link to="/timeline">时间轴</router-link>

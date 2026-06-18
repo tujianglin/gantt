@@ -1,5 +1,6 @@
 import Vue from 'vue'
 import Router from 'vue-router'
+import HomePage from './views/HomePage.vue'
 import BasicDemo from './views/BasicDemo.vue'
 import TableColumnsDemo from './views/TableColumnsDemo.vue'
 import TimelineDemo from './views/TimelineDemo.vue'
@@ -22,7 +23,11 @@ export default new Router({
   routes: [
     {
       path: '/',
-      redirect: '/basic'
+      name: 'home',
+      component: HomePage,
+      meta: {
+        title: '首页'
+      }
     },
     {
       path: '/basic',
