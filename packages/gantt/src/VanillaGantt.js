@@ -9,6 +9,13 @@ const DEFAULT_TASK_TOOLTIP = {
   offsetX: 12,
   offsetY: 12
 }
+const DEFAULT_MILESTONE_TOOLTIP = {
+  visible: true,
+  customLayout: null,
+  className: '',
+  offsetX: 12,
+  offsetY: 12
+}
 
 const DEFAULT_OPTIONS = {
   records: [],
@@ -47,13 +54,18 @@ const DEFAULT_OPTIONS = {
     progressField: 'progress',
     laneField: 'lane',
     statusField: 'status',
+    milestoneField: 'milestones',
+    milestoneDateField: 'date',
     labelText: 'title',
     subLabelText: 'subtitle',
     barStyle: null,
     projectStyle: null,
     customLayout: null,
+    milestoneStyle: null,
+    milestoneCustomLayout: null,
+    milestoneTooltip: false,
     clip: true,
-    draggable: true,
+    draggable: false,
     dragStep: 60 * 1000,
     tooltip: false,
     onClick: null,
@@ -101,6 +113,7 @@ export default class VanillaGantt {
     this.scrollLeft = 0
     this.disposers = []
     this.activeDrag = null
+    this.activeTooltip = null
     this.activeLinkTaskKey = null
     this.activeLinkGroupKey = null
     this.suppressClickUntil = 0
@@ -592,6 +605,10 @@ export default class VanillaGantt {
       svg.append(this.renderTask(task))
     })
 
+    this.visibleMilestones.forEach(item => {
+      svg.append(this.renderMilestone(item))
+    })
+
     this.visibleLinks.forEach(link => {
       this.appendLink(svg, link)
     })
@@ -704,6 +721,55 @@ export default class VanillaGantt {
     }
     this.bindTaskInteractions(fo, task)
     return fo
+  }
+
+  renderMilestone(item) {
+    const style = this.milestoneStyle(item)
+    const width = Number(item.milestone.width || style.width || 20)
+    const height = Number(item.milestone.height || style.height || 28)
+    const x = this.timeToX(this.milestoneDate(item.milestone)) - width / 2
+    const y = this.taskY(item.task) + (this.taskRenderHeight(item.task) - height) / 2
+    const fo = svgEl('foreignObject', 'vg-milestone-fo')
+    attrs(fo, {
+      x,
+      y,
+      width,
+      height
+    })
+
+    const payload = this.createMilestonePayload(item, { x, y, width, height })
+    const custom = this.resolveContent(this.taskBar.milestoneCustomLayout, payload)
+    fo.append(custom || this.renderDefaultMilestone(payload))
+    this.bindMilestoneInteractions(fo, item)
+    return fo
+  }
+
+  renderDefaultMilestone() {
+    const root = el('div', 'vg-milestone')
+    const pole = el('i')
+    const flag = el('b')
+    root.append(pole, flag)
+    return root
+  }
+
+  bindMilestoneInteractions(node, item) {
+    const onMouseEnter = event => {
+      this.showMilestoneTooltip(item, event)
+    }
+    const onMouseMove = event => {
+      this.positionTaskTooltip(event)
+    }
+    const onMouseLeave = () => {
+      this.hideTaskTooltip()
+    }
+    node.addEventListener('mouseenter', onMouseEnter)
+    node.addEventListener('mousemove', onMouseMove)
+    node.addEventListener('mouseleave', onMouseLeave)
+    this.disposers.push(() => {
+      node.removeEventListener('mouseenter', onMouseEnter)
+      node.removeEventListener('mousemove', onMouseMove)
+      node.removeEventListener('mouseleave', onMouseLeave)
+    })
   }
 
   bindTaskInteractions(node, task) {
@@ -887,12 +953,30 @@ export default class VanillaGantt {
     node.append(content)
     document.body.append(node)
     this.tooltipEl = node
+    this.activeTooltip = tooltip
+    this.positionTaskTooltip(event)
+  }
+
+  showMilestoneTooltip(item, event) {
+    const tooltip = this.milestoneTooltip
+    if (!tooltip || tooltip.visible === false) return
+
+    const payload = this.createMilestonePayload(item, { event })
+    const content = this.resolveContent(tooltip.customLayout, payload) || this.renderDefaultMilestoneTooltip(payload)
+    if (!content) return
+
+    this.hideTaskTooltip()
+    const node = el('div', `vg-tooltip${tooltip.className ? ` ${tooltip.className}` : ''}`)
+    node.append(content)
+    document.body.append(node)
+    this.tooltipEl = node
+    this.activeTooltip = tooltip
     this.positionTaskTooltip(event)
   }
 
   positionTaskTooltip(event) {
     if (!this.tooltipEl || !event) return
-    const tooltip = this.taskTooltip || {}
+    const tooltip = this.activeTooltip || this.taskTooltip || {}
     const offsetX = tooltip.offsetX === undefined ? 12 : Number(tooltip.offsetX)
     const offsetY = tooltip.offsetY === undefined ? 12 : Number(tooltip.offsetY)
     const rect = this.tooltipEl.getBoundingClientRect()
@@ -908,6 +992,7 @@ export default class VanillaGantt {
     if (!this.tooltipEl) return
     this.tooltipEl.remove()
     this.tooltipEl = null
+    this.activeTooltip = null
   }
 
   renderDefaultTaskTooltip(payload) {
@@ -923,6 +1008,16 @@ export default class VanillaGantt {
       meta.textContent = subtitle
       root.append(meta)
     }
+    return root
+  }
+
+  renderDefaultMilestoneTooltip(payload) {
+    const root = el('div', 'vg-tooltip-default')
+    const title = el('div', 'vg-tooltip-title')
+    title.textContent = payload.milestone.title || '里程碑'
+    const time = el('div', 'vg-tooltip-time')
+    time.textContent = formatDateTime(payload.date)
+    root.append(title, time)
     return root
   }
 
@@ -957,6 +1052,29 @@ export default class VanillaGantt {
     }
   }
 
+  createMilestonePayload(item, extra = {}) {
+    const row = this.rowById[item.task.__rowId]
+    return {
+      milestone: item.milestone,
+      milestoneRecord: item.milestone,
+      task: item.task,
+      taskRecord: item.task,
+      row,
+      rowRecord: row,
+      taskKey: this.taskKey(item.task),
+      rowKey: item.task.__rowId,
+      index: item.index,
+      date: new Date(toTime(this.milestoneDate(item.milestone))),
+      x: extra.x,
+      y: extra.y,
+      width: extra.width,
+      height: extra.height,
+      event: extra.event,
+      ganttInstance: this,
+      gantt: this
+    }
+  }
+
   callTaskCallback(name, task, event, payload) {
     const callback = this.taskBar[name]
     if (typeof callback !== 'function') return undefined
@@ -964,13 +1082,13 @@ export default class VanillaGantt {
   }
 
   isTaskDraggable(task) {
-    if (task.draggable !== undefined) return task.draggable !== false
+    if (task.draggable !== undefined) return task.draggable === true
     if (task.parentAggregate) return false
     const draggable = this.taskBar.draggable
     if (typeof draggable === 'function') {
-      return draggable(this.createTaskPayload(task)) !== false
+      return draggable(this.createTaskPayload(task)) === true
     }
-    return draggable !== false
+    return draggable === true
   }
 
   findSourceTask(task) {
@@ -1179,6 +1297,15 @@ export default class VanillaGantt {
     return task[this.taskBar.statusField]
   }
 
+  taskMilestones(task) {
+    const value = task[this.taskBar.milestoneField]
+    return Array.isArray(value) ? value : []
+  }
+
+  milestoneDate(milestone) {
+    return milestone[this.taskBar.milestoneDateField || 'date']
+  }
+
   taskLabel(task, label) {
     if (!label) return ''
     if (typeof label === 'function') return label(task)
@@ -1192,6 +1319,18 @@ export default class VanillaGantt {
       index: this.renderTasks.findIndex(item => this.taskKey(item) === this.taskKey(task)),
       startDate: new Date(toTime(this.taskStart(task))),
       endDate: new Date(toTime(this.taskEnd(task))),
+      ganttInstance: this
+    })
+  }
+
+  milestoneStyle(item) {
+    return this.resolveStyle(this.taskBar.milestoneStyle, {
+      milestone: item.milestone,
+      milestoneRecord: item.milestone,
+      task: item.task,
+      taskRecord: item.task,
+      index: item.index,
+      date: new Date(toTime(this.milestoneDate(item.milestone))),
       ganttInstance: this
     })
   }
@@ -1433,6 +1572,16 @@ export default class VanillaGantt {
     }
   }
 
+  get milestoneTooltip() {
+    const tooltip = this.taskBar.milestoneTooltip
+    if (tooltip === false || tooltip === undefined || tooltip === null) return null
+    if (tooltip === true) return DEFAULT_MILESTONE_TOOLTIP
+    return {
+      ...DEFAULT_MILESTONE_TOOLTIP,
+      ...tooltip
+    }
+  }
+
   get dependency() {
     return this.options.dependency || {}
   }
@@ -1638,6 +1787,19 @@ export default class VanillaGantt {
 
   get stripedTasks() {
     return this.renderTasks.filter(task => task.striped)
+  }
+
+  get visibleMilestones() {
+    const milestones = []
+    this.visibleTasks.forEach(task => {
+      this.taskMilestones(task).forEach((milestone, index) => {
+        const date = toTime(this.milestoneDate(milestone))
+        if (!Number.isFinite(date)) return
+        if (date < this.startTime || date > this.endTime) return
+        milestones.push({ task, milestone, index })
+      })
+    })
+    return milestones
   }
 
   get visibleTasks() {

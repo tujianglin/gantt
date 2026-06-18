@@ -34,6 +34,17 @@ export interface GanttTaskRecord {
   replan?: 'before' | 'after' | string
   workStatus?: string
   parentAggregate?: boolean
+  milestones?: GanttMilestoneRecord[]
+  [key: string]: unknown
+}
+
+export interface GanttMilestoneRecord {
+  id?: string | number
+  title?: string
+  date?: GanttTimeValue
+  width?: number
+  height?: number
+  type?: string
   [key: string]: unknown
 }
 
@@ -149,11 +160,16 @@ export interface GanttTaskBarOptions {
   progressField?: string
   laneField?: string
   statusField?: string
+  milestoneField?: string
+  milestoneDateField?: string
   labelText?: string | ((taskRecord: GanttTaskRecord) => string)
   subLabelText?: string | ((taskRecord: GanttTaskRecord) => string)
   barStyle?: GanttTaskBarStyle | ((args: GanttTaskBarInteractionContext) => GanttTaskBarStyle)
   projectStyle?: GanttTaskBarStyle | ((args: GanttTaskBarInteractionContext) => GanttTaskBarStyle)
   customLayout?: GanttRenderer<GanttTaskBarCustomLayoutContext>
+  milestoneStyle?: GanttMilestoneStyle | ((args: GanttMilestoneCustomLayoutContext) => GanttMilestoneStyle)
+  milestoneCustomLayout?: GanttRenderer<GanttMilestoneCustomLayoutContext>
+  milestoneTooltip?: boolean | GanttMilestoneTooltipOptions
   clip?: boolean
   draggable?: boolean | ((context: GanttTaskBarCustomLayoutContext) => boolean)
   dragStep?: number
@@ -168,9 +184,22 @@ export interface GanttTaskBarOptions {
   lanes?: GanttLane[]
 }
 
+export interface GanttMilestoneStyle {
+  width?: number
+  height?: number
+}
+
 export interface GanttTaskBarTooltipOptions {
   visible?: boolean
   customLayout?: GanttRenderer<GanttTaskBarEventContext>
+  className?: string
+  offsetX?: number
+  offsetY?: number
+}
+
+export interface GanttMilestoneTooltipOptions {
+  visible?: boolean
+  customLayout?: GanttRenderer<GanttMilestoneCustomLayoutContext>
   className?: string
   offsetX?: number
   offsetY?: number
@@ -304,6 +333,25 @@ export interface GanttTaskBarDragContext extends GanttTaskBarCustomLayoutContext
   sourceTask: GanttTaskRecord
   originalStartDate: Date
   originalEndDate: Date
+}
+
+export interface GanttMilestoneCustomLayoutContext extends GanttRenderContext {
+  milestone: GanttMilestoneRecord
+  milestoneRecord: GanttMilestoneRecord
+  task: GanttTaskRecord
+  taskRecord: GanttTaskRecord
+  rowRecord?: GanttRecord & { level: number }
+  row?: GanttRecord & { level: number }
+  taskKey?: string | number
+  rowKey?: string | number
+  index: number
+  date: Date
+  x: number
+  y: number
+  width: number
+  height: number
+  event?: Event
+  ganttInstance: VanillaGantt
 }
 
 export interface GanttTimelineRenderContext extends GanttRenderContext {

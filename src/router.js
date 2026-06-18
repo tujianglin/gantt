@@ -3,7 +3,9 @@ import Router from 'vue-router'
 import BasicDemo from './views/BasicDemo.vue'
 import TableColumnsDemo from './views/TableColumnsDemo.vue'
 import TimelineDemo from './views/TimelineDemo.vue'
+import CapacityUsageDemo from './views/CapacityUsageDemo.vue'
 import TaskInteractionDemo from './views/TaskInteractionDemo.vue'
+import WorkOrderMilestoneDemo from './views/WorkOrderMilestoneDemo.vue'
 import WorkOrderStatusDemo from './views/WorkOrderStatusDemo.vue'
 import OptionsDocs from './views/OptionsDocs.vue'
 
@@ -41,11 +43,27 @@ export default new Router({
       }
     },
     {
+      path: '/capacity-usage',
+      name: 'capacity-usage',
+      component: CapacityUsageDemo,
+      meta: {
+        title: '工位负载率'
+      }
+    },
+    {
       path: '/task-interaction',
       name: 'task-interaction',
       component: TaskInteractionDemo,
       meta: {
         title: '任务交互'
+      }
+    },
+    {
+      path: '/work-order-milestone',
+      name: 'work-order-milestone',
+      component: WorkOrderMilestoneDemo,
+      meta: {
+        title: '工单里程碑'
       }
     },
     {

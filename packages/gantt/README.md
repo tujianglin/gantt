@@ -518,11 +518,18 @@ interface GanttTaskRecord {
   locked?: boolean
   striped?: boolean
   draggable?: boolean
+  milestones?: Array<{
+    id?: string | number
+    title?: string
+    date?: string | number | Date
+    width?: number
+    height?: number
+  }>
   [key: string]: unknown
 }
 ```
 
-任务字段名可以通过 `taskBar.startDateField`、`taskBar.endDateField`、`taskBar.progressField`、`taskBar.laneField`、`taskBar.statusField` 改掉。
+任务字段名可以通过 `taskBar.startDateField`、`taskBar.endDateField`、`taskBar.progressField`、`taskBar.laneField`、`taskBar.statusField` 改掉。里程碑数组默认读取 `task.milestones`。
 
 ### taskListTable
 
@@ -606,13 +613,18 @@ interface GanttTaskRecord {
 | `progressField` | `'progress'` | 进度字段 |
 | `laneField` | `'lane'` | 泳道字段 |
 | `statusField` | `'status'` | 状态字段 |
+| `milestoneField` | `'milestones'` | task 上里程碑数组字段 |
+| `milestoneDateField` | `'date'` | 里程碑时间字段 |
 | `labelText` | `'title'` | 默认任务标题字段或函数 |
 | `subLabelText` | `'subtitle'` | 默认任务副标题字段或函数 |
 | `barStyle` | `null` | 普通任务默认样式，支持函数 |
 | `projectStyle` | `null` | 父节点聚合任务样式，支持函数 |
 | `customLayout` | `null` | 任务条自定义模板 |
+| `milestoneStyle` | `null` | 里程碑尺寸配置，支持函数 |
+| `milestoneCustomLayout` | `null` | 里程碑自定义模板，支持模板字符串 |
+| `milestoneTooltip` | `false` | 里程碑 tooltip，`true` 显示默认时间节点，也支持自定义模板 |
 | `clip` | `true` | 是否裁剪超出时间范围的任务 |
-| `draggable` | `true` | 是否允许拖拽，支持函数 |
+| `draggable` | `false` | 是否允许拖拽，默认不支持拖拽；只有配置为 `true` 或函数返回 `true` 才能拖拽 |
 | `dragStep` | `60000` | 拖拽吸附步长，单位毫秒 |
 | `tooltip` | `false` | Tooltip 配置，默认关闭 |
 | `lanes` | `plan/load/unload` | 行内多任务泳道 |
@@ -782,4 +794,3 @@ src/views/WorkOrderStatusDemo.vue
 ```bash
 npm --prefix packages/gantt run build
 ```
-
