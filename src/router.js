@@ -4,6 +4,7 @@ import BasicDemo from './views/BasicDemo.vue'
 import TableColumnsDemo from './views/TableColumnsDemo.vue'
 import TimelineDemo from './views/TimelineDemo.vue'
 import CapacityUsageDemo from './views/CapacityUsageDemo.vue'
+import RowDragDemo from './views/RowDragDemo.vue'
 import TaskInteractionDemo from './views/TaskInteractionDemo.vue'
 import WorkOrderMilestoneDemo from './views/WorkOrderMilestoneDemo.vue'
 import WorkOrderStatusDemo from './views/WorkOrderStatusDemo.vue'
@@ -48,6 +49,14 @@ export default new Router({
       component: CapacityUsageDemo,
       meta: {
         title: '工位负载率'
+      }
+    },
+    {
+      path: '/row-drag',
+      name: 'row-drag',
+      component: RowDragDemo,
+      meta: {
+        title: '行拖拽'
       }
     },
     {

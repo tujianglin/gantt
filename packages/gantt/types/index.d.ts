@@ -139,6 +139,8 @@ export interface GanttTaskListTableOptions {
   minTableWidth?: number
   maxTableWidth?: number
   columnResizable?: boolean
+  rowDraggable?: boolean | ((context: GanttRowDragContext) => boolean)
+  onRowDragEnd?: (context: GanttRowDragEndContext) => void
   headerStyle?: GanttTableHeaderStyle
   columns?: GanttTableColumn[]
   renderHeader?: GanttRenderer<GanttRenderContext>
@@ -274,6 +276,18 @@ export interface GanttMarkLine {
 export interface GanttScrollPayload {
   scrollLeft: number
   scrollTop: number
+}
+
+export interface GanttRowDragContext extends GanttRenderContext {
+  record: GanttRecord & { level: number }
+  row: GanttRecord & { level: number }
+}
+
+export interface GanttRowDragEndContext extends GanttRenderContext {
+  record: GanttRecord
+  sourceIndex: number
+  targetIndex: number
+  records: GanttRecord[]
 }
 
 export interface GanttRenderContext {

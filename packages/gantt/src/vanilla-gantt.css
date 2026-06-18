@@ -53,6 +53,31 @@
   background: #fbfdfd;
 }
 
+.vg-row--draggable {
+  cursor: grab;
+}
+
+.vg-row--draggable.vg-row--handle-draggable {
+  cursor: default;
+}
+
+.vg-row--handle-draggable [data-vg-row-drag-handle] {
+  cursor: grab;
+}
+
+.vg-row--handle-draggable [data-vg-row-drag-handle]:active {
+  cursor: grabbing;
+}
+
+.vg-row--dragging {
+  opacity: 0.55;
+  cursor: grabbing;
+}
+
+.vg-row--drag-over {
+  box-shadow: inset 0 2px 0 #297bff;
+}
+
 .vg-table-header-cell,
 .vg-table-cell {
   position: relative;

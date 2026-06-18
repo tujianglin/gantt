@@ -31,6 +31,8 @@ const DEFAULT_OPTIONS = {
     minTableWidth: 120,
     maxTableWidth: 640,
     columnResizable: true,
+    rowDraggable: false,
+    onRowDragEnd: null,
     headerStyle: null,
     columns: [
       { field: 'name', title: '工位', width: 170, tree: true }
@@ -113,6 +115,7 @@ export default class VanillaGantt {
     this.scrollLeft = 0
     this.disposers = []
     this.activeDrag = null
+    this.activeRowDragKey = null
     this.activeTooltip = null
     this.activeLinkTaskKey = null
     this.activeLinkGroupKey = null
@@ -270,6 +273,9 @@ export default class VanillaGantt {
       this.tableColumns.forEach((column, columnIndex) => {
         rowEl.append(this.renderTableCell(row, column, columnIndex))
       })
+      if (this.isRowDraggable(row)) {
+        this.bindRowDrag(rowEl, row)
+      }
       inner.append(rowEl)
     })
 
@@ -282,6 +288,68 @@ export default class VanillaGantt {
     body.addEventListener('wheel', onWheel, { passive: false })
     this.disposers.push(() => body.removeEventListener('wheel', onWheel))
     return body
+  }
+
+  bindRowDrag(rowEl, row) {
+    const rowKey = this.recordKey(row)
+    const dragHandles = Array.from(rowEl.querySelectorAll('[data-vg-row-drag-handle]'))
+    const hasHandle = dragHandles.length > 0
+    rowEl.classList.add('vg-row--draggable')
+    rowEl.classList.toggle('vg-row--handle-draggable', hasHandle)
+    rowEl.draggable = !hasHandle
+    rowEl.dataset.rowKey = String(rowKey)
+    dragHandles.forEach(handle => {
+      handle.draggable = true
+    })
+
+    const onDragStart = event => {
+      const fromHandle = event.target && event.target.closest && event.target.closest('[data-vg-row-drag-handle]')
+      if (hasHandle && !fromHandle) {
+        event.preventDefault()
+        return
+      }
+      if (event.target && event.target.closest && event.target.closest('button,input,select,textarea,a,[data-vg-no-row-drag]')) {
+        event.preventDefault()
+        return
+      }
+      this.activeRowDragKey = rowKey
+      rowEl.classList.add('vg-row--dragging')
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move'
+        event.dataTransfer.setData('text/plain', String(rowKey))
+      }
+    }
+    const onDragOver = event => {
+      if (!this.activeRowDragKey || String(this.activeRowDragKey) === String(rowKey)) return
+      event.preventDefault()
+      rowEl.classList.add('vg-row--drag-over')
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+    }
+    const onDragLeave = () => {
+      rowEl.classList.remove('vg-row--drag-over')
+    }
+    const onDrop = event => {
+      event.preventDefault()
+      rowEl.classList.remove('vg-row--drag-over')
+      this.moveRowRecord(this.activeRowDragKey, rowKey)
+    }
+    const onDragEnd = () => {
+      rowEl.classList.remove('vg-row--dragging', 'vg-row--drag-over')
+      this.activeRowDragKey = null
+    }
+
+    rowEl.addEventListener('dragstart', onDragStart)
+    rowEl.addEventListener('dragover', onDragOver)
+    rowEl.addEventListener('dragleave', onDragLeave)
+    rowEl.addEventListener('drop', onDrop)
+    rowEl.addEventListener('dragend', onDragEnd)
+    this.disposers.push(() => {
+      rowEl.removeEventListener('dragstart', onDragStart)
+      rowEl.removeEventListener('dragover', onDragOver)
+      rowEl.removeEventListener('dragleave', onDragLeave)
+      rowEl.removeEventListener('drop', onDrop)
+      rowEl.removeEventListener('dragend', onDragEnd)
+    })
   }
 
   renderTableCell(row, column, columnIndex) {
@@ -382,6 +450,57 @@ export default class VanillaGantt {
       node.addEventListener('click', onClick)
       this.disposers.push(() => node.removeEventListener('click', onClick))
     })
+  }
+
+  isRowDraggable(row) {
+    const draggable = this.taskListTable.rowDraggable
+    if (typeof draggable === 'function') {
+      return draggable({
+        record: row,
+        row,
+        gantt: this
+      }) === true
+    }
+    return draggable === true
+  }
+
+  moveRowRecord(sourceKey, targetKey) {
+    if (sourceKey === undefined || sourceKey === null || targetKey === undefined || targetKey === null) return
+    if (String(sourceKey) === String(targetKey)) return
+
+    const source = this.findRecordLocation(sourceKey)
+    const target = this.findRecordLocation(targetKey)
+    if (!source || !target || source.list !== target.list) return
+
+    const [record] = source.list.splice(source.index, 1)
+    const nextIndex = source.index < target.index ? target.index - 1 : target.index
+    source.list.splice(nextIndex, 0, record)
+    this.activeRowDragKey = null
+
+    if (typeof this.taskListTable.onRowDragEnd === 'function') {
+      this.taskListTable.onRowDragEnd({
+        record,
+        sourceIndex: source.index,
+        targetIndex: nextIndex,
+        records: source.list,
+        gantt: this
+      })
+    }
+    this.render()
+  }
+
+  findRecordLocation(recordKey, records = this.options.records) {
+    for (let index = 0; index < records.length; index += 1) {
+      const record = records[index]
+      if (String(this.recordKey(record)) === String(recordKey)) {
+        return { record, list: records, index }
+      }
+      if (record.children) {
+        const found = this.findRecordLocation(recordKey, record.children)
+        if (found) return found
+      }
+    }
+    return null
   }
 
   renderResizeHandle(root) {

@@ -539,6 +539,8 @@ interface GanttTaskRecord {
 | `minTableWidth` | `number` | `120` | 左侧表格整体最小宽度 |
 | `maxTableWidth` | `number` | `640` | 左侧表格整体最大宽度 |
 | `columnResizable` | `boolean` | `true` | 是否允许拖拽调整列宽 |
+| `rowDraggable` | `boolean \| function` | `false` | 是否允许上下拖拽调整行顺序，默认关闭 |
+| `onRowDragEnd` | `function` | `null` | 行拖拽完成回调，返回 `record`、`sourceIndex`、`targetIndex`、`records` |
 | `headerStyle` | `GanttTableHeaderStyle` | `null` | 表头整体样式 |
 | `columns` | `GanttTableColumn[]` | `[{ field: 'name', title: '工位', width: 170, tree: true }]` | 表格列 |
 | `renderHeader` | `renderer` | `null` | 整体表头自定义渲染 |
@@ -560,6 +562,15 @@ interface GanttTaskRecord {
 | `valueGetter` | 自定义单元格值 |
 | `renderHeader` | 当前列表头模板 |
 | `renderCell` | 当前列单元格模板 |
+
+行拖拽默认可从行区域起拖。如果自定义单元格里提供 `data-vg-row-drag-handle`，则只有从该元素起拖才会触发行拖拽：
+
+```js
+renderCell: ({ value }) => `
+  <span data-vg-row-drag-handle>⠿</span>
+  <span>${value}</span>
+`
+```
 
 ### timelineHeader
 
