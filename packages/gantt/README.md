@@ -501,7 +501,8 @@ gantt.destroy()
 | `taskBar` | `GanttTaskBarOptions` | 见下方 | 任务条配置 |
 | `dependency` | `GanttDependencyOptions` | 见下方 | 依赖连接线配置 |
 | `grid` | `GanttGridOptions` | 见下方 | 时间区网格和背景配置 |
-| `virtualScroll` | `{ enabled?: boolean, bufferPx?: number }` | `{ enabled: false, bufferPx: 1200 }` | 横向虚拟渲染，长时间范围高密度刻度下只渲染视口附近内容 |
+| `virtualScroll` | `{ enabled?: boolean, bufferPx?: number, rowEnabled?: boolean, rowBufferPx?: number }` | `{ enabled: false, bufferPx: 1200, rowEnabled: true, rowBufferPx: 4800 }` | 虚拟渲染。开启后 x 轴只渲染视口附近时间内容，y 轴只渲染视口附近行 |
+| `loading` | `{ enabled?: boolean, text?: string, className?: string, customLayout?: renderer }` | `{ enabled: false, text: '加载中...' }` | `setOptions` 重渲染时显示加载层。`customLayout` 支持模板字符串自定义 |
 | `markLine` | `GanttMarkLine \| GanttMarkLine[] \| null` | `null` | 标记线 |
 | `onScroll` | `(payload) => void` | `null` | 滚动回调，返回 `scrollLeft`、`scrollTop` |
 

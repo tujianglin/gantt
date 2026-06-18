@@ -472,6 +472,20 @@ export type GanttRenderer<T> = (context: T) => Node | string | { rootContainer?:
 export interface GanttVirtualScrollOptions {
   enabled?: boolean
   bufferPx?: number
+  rowEnabled?: boolean
+  rowBufferPx?: number
+}
+
+export interface GanttLoadingContext extends GanttRenderContext {
+  text: string
+  ganttInstance: VanillaGantt
+}
+
+export interface GanttLoadingOptions {
+  enabled?: boolean
+  text?: string
+  className?: string
+  customLayout?: GanttRenderer<GanttLoadingContext>
 }
 
 export interface VanillaGanttOptions {
@@ -489,6 +503,7 @@ export interface VanillaGanttOptions {
   dependency?: GanttDependencyOptions
   grid?: GanttGridOptions
   virtualScroll?: GanttVirtualScrollOptions
+  loading?: GanttLoadingOptions
   markLine?: GanttMarkLine | GanttMarkLine[] | null
   onScroll?: (payload: GanttScrollPayload) => void
 }

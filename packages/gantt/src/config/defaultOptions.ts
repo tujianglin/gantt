@@ -115,7 +115,15 @@ export const DEFAULT_OPTIONS = {
   },
   virtualScroll: {
     enabled: false,
-    bufferPx: 1200
+    bufferPx: 1200,
+    rowEnabled: true,
+    rowBufferPx: 4800
+  },
+  loading: {
+    enabled: false,
+    text: '加载中...',
+    className: '',
+    customLayout: null
   },
   markLine: null,
   onScroll: null

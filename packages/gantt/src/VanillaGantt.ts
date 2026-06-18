@@ -22,9 +22,15 @@ export default class VanillaGantt {
     this.scrollLeft = 0
     this.disposers = []
     this.virtualDisposers = []
+    this.leftVirtualDisposers = []
     this.taskMeasureFrames = []
     this.virtualRenderFrame = null
+    this.optionsRenderFrame = null
+    this.hideLoadingFrame = null
+    this.pendingVirtualRender = { x: false, y: false }
+    this.loadingVisible = false
     this.activeVirtualWindow = null
+    this.activeVirtualRowWindow = null
     this.activeDrag = null
     this.activeRowDragKey = null
     this.activeTooltip = null
@@ -44,7 +50,13 @@ export default class VanillaGantt {
     if (options.records && options.records !== previousRecords) {
       this.seedExpandedRows(options.records, true)
     }
-    this.render()
+    this.activeVirtualRowWindow = null
+    if (this.isLoadingEnabled) {
+      this.showLoading()
+      this.scheduleOptionsRender()
+    } else {
+      this.render()
+    }
   }
 
   destroy() {
@@ -58,7 +70,17 @@ export default class VanillaGantt {
       cancelAnimationFrame(this.virtualRenderFrame)
       this.virtualRenderFrame = null
     }
+    if (this.optionsRenderFrame) {
+      cancelAnimationFrame(this.optionsRenderFrame)
+      this.optionsRenderFrame = null
+    }
+    if (this.hideLoadingFrame) {
+      cancelAnimationFrame(this.hideLoadingFrame)
+      this.hideLoadingFrame = null
+    }
+    this.pendingVirtualRender = { x: false, y: false }
     this.cleanupVirtualContent()
+    this.cleanupLeftVirtualContent()
     this.disposers.forEach(dispose => dispose())
     this.disposers = []
   }
@@ -70,9 +92,15 @@ export default class VanillaGantt {
     this.virtualDisposers = []
   }
 
+  cleanupLeftVirtualContent() {
+    this.leftVirtualDisposers.forEach(dispose => dispose())
+    this.leftVirtualDisposers = []
+  }
+
   render() {
     this.cleanup()
     this.activeVirtualWindow = this.virtualWindow
+    this.activeVirtualRowWindow = this.virtualRowWindow
 
     const root = el('div', 'vg')
     root.style.setProperty('--vg-left-width', `${this.tableWidth}px`)
@@ -84,6 +112,9 @@ export default class VanillaGantt {
     left.append(this.renderLeftHeader(), this.renderLeftBody(), this.renderResizeHandle(root))
     right.append(this.renderTimeline(), this.renderBody())
     root.append(left, right)
+    if (this.loadingVisible) {
+      root.append(this.renderLoadingOverlay())
+    }
 
     this.container.innerHTML = ''
     this.container.append(root)
@@ -92,6 +123,53 @@ export default class VanillaGantt {
       this.scrollEl.scrollTop = this.scrollTop
       this.scrollEl.scrollLeft = this.scrollLeft
     }
+  }
+
+  scheduleOptionsRender() {
+    if (this.optionsRenderFrame) return
+    this.optionsRenderFrame = requestAnimationFrame(() => {
+      this.optionsRenderFrame = null
+      this.render()
+      this.hideLoadingFrame = requestAnimationFrame(() => {
+        this.hideLoadingFrame = null
+        this.hideLoading()
+      })
+    })
+  }
+
+  showLoading() {
+    this.loadingVisible = true
+    const host = this.rootEl || this.container
+    if (!host.querySelector('.vg-loading')) {
+      host.append(this.renderLoadingOverlay())
+    }
+  }
+
+  hideLoading() {
+    this.loadingVisible = false
+    const node = this.container.querySelector('.vg-loading')
+    if (node && node.parentNode) node.parentNode.removeChild(node)
+  }
+
+  renderLoadingOverlay() {
+    const loading = this.loadingOptions
+    const overlay = el('div', `vg-loading${loading.className ? ` ${loading.className}` : ''}`)
+    const custom = this.resolveContent(loading.customLayout, {
+      gantt: this,
+      ganttInstance: this,
+      text: loading.text || '加载中...'
+    })
+    if (custom) {
+      overlay.append(custom)
+    } else {
+      const content = el('div', 'vg-loading-content')
+      const spinner = el('span', 'vg-loading-spinner')
+      const text = el('span', 'vg-loading-text')
+      text.textContent = loading.text || '加载中...'
+      content.append(spinner, text)
+      overlay.append(content)
+    }
+    return overlay
   }
 
   renderLeftHeader() {
@@ -182,25 +260,19 @@ export default class VanillaGantt {
     }
   }
 
+  addLeftDisposer(dispose) {
+    this.leftVirtualDisposers.push(dispose)
+  }
+
   renderLeftBody() {
     const body = el('div', 'vg-left-body')
     const inner = el('div', 'vg-left-body-inner')
     inner.style.height = `${this.bodyHeight}px`
-    inner.style.transform = `translateY(-${this.scrollTop}px)`
+    inner.style.position = this.isVerticalVirtualScrollEnabled ? 'relative' : ''
+    inner.style.transform = `translate3d(0, -${this.scrollTop}px, 0)`
     this.leftBodyInner = inner
 
-    this.visibleRows.forEach(row => {
-      const rowEl = el('div', `vg-row${row.children ? ' vg-row--group' : ''}`)
-      rowEl.style.height = `${this.rowHeight(row)}px`
-      rowEl.style.gridTemplateColumns = this.tableGridTemplateColumns
-      this.tableColumns.forEach((column, columnIndex) => {
-        rowEl.append(this.renderTableCell(row, column, columnIndex))
-      })
-      if (this.isRowDraggable(row)) {
-        this.bindRowDrag(rowEl, row)
-      }
-      inner.append(rowEl)
-    })
+    this.renderLeftBodyContent()
 
     body.append(inner)
     const onWheel = event => {
@@ -211,6 +283,36 @@ export default class VanillaGantt {
     body.addEventListener('wheel', onWheel, { passive: false })
     this.disposers.push(() => body.removeEventListener('wheel', onWheel))
     return body
+  }
+
+  renderLeftBodyContent() {
+    if (!this.leftBodyInner) return
+    this.cleanupLeftVirtualContent()
+    this.leftBodyInner.innerHTML = ''
+    this.leftBodyInner.style.height = `${this.bodyHeight}px`
+    this.leftBodyInner.style.position = this.isVerticalVirtualScrollEnabled ? 'relative' : ''
+    this.activeVirtualRowWindow = this.virtualRowWindow
+
+    const fragment = document.createDocumentFragment()
+    this.renderedRowEntries.forEach(({ row, top }) => {
+      const rowEl = el('div', `vg-row${row.children ? ' vg-row--group' : ''}`)
+      rowEl.style.height = `${this.rowHeight(row)}px`
+      rowEl.style.gridTemplateColumns = this.tableGridTemplateColumns
+      if (this.isVerticalVirtualScrollEnabled) {
+        rowEl.style.position = 'absolute'
+        rowEl.style.left = '0'
+        rowEl.style.right = '0'
+        rowEl.style.top = `${top}px`
+      }
+      this.tableColumns.forEach((column, columnIndex) => {
+        rowEl.append(this.renderTableCell(row, column, columnIndex))
+      })
+      if (this.isRowDraggable(row)) {
+        this.bindRowDrag(rowEl, row)
+      }
+      fragment.append(rowEl)
+    })
+    this.leftBodyInner.append(fragment)
   }
 
   bindRowDrag(rowEl, row) {
@@ -266,7 +368,7 @@ export default class VanillaGantt {
     rowEl.addEventListener('dragleave', onDragLeave)
     rowEl.addEventListener('drop', onDrop)
     rowEl.addEventListener('dragend', onDragEnd)
-    this.disposers.push(() => {
+    this.addLeftDisposer(() => {
       rowEl.removeEventListener('dragstart', onDragStart)
       rowEl.removeEventListener('dragover', onDragOver)
       rowEl.removeEventListener('dragleave', onDragLeave)
@@ -371,7 +473,7 @@ export default class VanillaGantt {
         this.toggleRow(row)
       }
       node.addEventListener('click', onClick)
-      this.disposers.push(() => node.removeEventListener('click', onClick))
+      this.addLeftDisposer(() => node.removeEventListener('click', onClick))
     })
   }
 
@@ -461,19 +563,17 @@ export default class VanillaGantt {
 
     const stage = el('div', 'vg-timeline-stage')
     stage.style.width = `${this.chartWidth}px`
-    stage.style.transform = `translateX(-${this.scrollLeft}px)`
+    stage.style.height = `${this.headerHeight}px`
+    stage.style.position = 'relative'
+    stage.style.transform = `translate3d(-${this.scrollLeft}px, 0, 0)`
     this.timelineStage = stage
 
     const svg = svgEl('svg', 'vg-timeline-svg')
-    attrs(svg, {
-      width: this.chartWidth,
-      height: this.headerHeight,
-      viewBox: `0 0 ${this.chartWidth} ${this.headerHeight}`
-    })
     if (this.timelineHeader.backgroundColor) {
       svg.style.background = this.timelineHeader.backgroundColor
     }
     this.timelineSvg = svg
+    this.applyTimelineSvgViewport(svg)
     this.renderTimelineSvgContent(svg)
 
     stage.append(svg)
@@ -483,6 +583,7 @@ export default class VanillaGantt {
 
   renderTimelineSvgContent(svg = this.timelineSvg) {
     if (!svg) return
+    this.applyTimelineSvgViewport(svg)
     svg.innerHTML = ''
     let y = 0
     this.timelineUnitsByScale.forEach((units, scaleIndex) => {
@@ -493,6 +594,22 @@ export default class VanillaGantt {
       })
       y += height
     })
+  }
+
+  applyTimelineSvgViewport(svg = this.timelineSvg) {
+    if (!svg) return
+    const window = this.activeVirtualWindow || this.virtualWindow
+    const width = Math.max(1, window.xEnd - window.xStart)
+    attrs(svg, {
+      width,
+      height: this.headerHeight,
+      viewBox: `${window.xStart} 0 ${width} ${this.headerHeight}`
+    })
+    svg.style.position = 'absolute'
+    svg.style.left = `${window.xStart}px`
+    svg.style.top = '0'
+    svg.style.width = `${width}px`
+    svg.style.height = `${this.headerHeight}px`
   }
 
   renderTimelineUnit(unit, y, height, scale, scaleIndex) {
@@ -529,15 +646,12 @@ export default class VanillaGantt {
     const stage = el('div', 'vg-stage')
     stage.style.width = `${this.chartWidth}px`
     stage.style.minWidth = `${this.chartWidth}px`
+    stage.style.height = `${this.bodyHeight}px`
+    stage.style.position = 'relative'
 
     const svg = svgEl('svg', 'vg-svg')
-    attrs(svg, {
-      width: this.chartWidth,
-      height: this.bodyHeight,
-      viewBox: `0 0 ${this.chartWidth} ${this.bodyHeight}`
-    })
-
     this.bodySvg = svg
+    this.applyBodySvgViewport(svg)
     this.renderBodySvgContent(svg)
     const onCanvasClick = () => {
       if (this.clearActiveLinkGroup()) this.render()
@@ -549,20 +663,21 @@ export default class VanillaGantt {
 
     const onScroll = () => {
       const previousScrollLeft = this.scrollLeft
+      const previousScrollTop = this.scrollTop
       this.scrollTop = scroll.scrollTop
       this.scrollLeft = scroll.scrollLeft
       if (this.leftBodyInner) {
-        this.leftBodyInner.style.transform = `translateY(-${this.scrollTop}px)`
+        this.leftBodyInner.style.transform = `translate3d(0, -${this.scrollTop}px, 0)`
       }
       if (this.timelineStage) {
-        this.timelineStage.style.transform = `translateX(-${this.scrollLeft}px)`
+        this.timelineStage.style.transform = `translate3d(-${this.scrollLeft}px, 0, 0)`
       }
       if (typeof this.options.onScroll === 'function') {
         this.options.onScroll({ scrollLeft: this.scrollLeft, scrollTop: this.scrollTop })
       }
-      if (previousScrollLeft !== this.scrollLeft && this.shouldRefreshVirtualWindow()) {
-        this.scheduleVirtualRender()
-      }
+      const refreshX = previousScrollLeft !== this.scrollLeft && this.shouldRefreshVirtualWindow()
+      const refreshY = previousScrollTop !== this.scrollTop && this.shouldRefreshVirtualRows()
+      if (refreshX || refreshY) this.scheduleVirtualRender({ x: refreshX, y: refreshY })
     }
     scroll.addEventListener('scroll', onScroll)
     this.disposers.push(() => scroll.removeEventListener('scroll', onScroll))
@@ -574,9 +689,28 @@ export default class VanillaGantt {
   renderBodySvgContent(svg = this.bodySvg) {
     if (!svg) return
     this.cleanupVirtualContent()
+    this.applyBodySvgViewport(svg)
     svg.innerHTML = ''
     svg.append(this.renderDefs())
     this.appendGrid(svg)
+  }
+
+  applyBodySvgViewport(svg = this.bodySvg) {
+    if (!svg) return
+    const xWindow = this.activeVirtualWindow || this.virtualWindow
+    const yWindow = this.activeVirtualRowWindow || this.virtualRowWindow
+    const width = Math.max(1, xWindow.xEnd - xWindow.xStart)
+    const height = Math.max(1, yWindow.yEnd - yWindow.yStart)
+    attrs(svg, {
+      width,
+      height,
+      viewBox: `${xWindow.xStart} ${yWindow.yStart} ${width} ${height}`
+    })
+    svg.style.position = 'absolute'
+    svg.style.left = `${xWindow.xStart}px`
+    svg.style.top = `${yWindow.yStart}px`
+    svg.style.width = `${width}px`
+    svg.style.height = `${height}px`
   }
 
   shouldRefreshVirtualWindow() {
@@ -585,12 +719,29 @@ export default class VanillaGantt {
     return Math.abs(this.scrollLeft - this.activeVirtualWindow.renderedForLeft) > threshold
   }
 
-  scheduleVirtualRender() {
+  shouldRefreshVirtualRows() {
+    if (!this.isVerticalVirtualScrollEnabled || !this.activeVirtualRowWindow) return false
+    const threshold = Math.max(240, this.virtualRowBufferPx * 0.75)
+    return Math.abs(this.scrollTop - this.activeVirtualRowWindow.renderedForTop) > threshold
+  }
+
+  scheduleVirtualRender(reason = { x: true, y: true }) {
+    this.pendingVirtualRender.x = this.pendingVirtualRender.x || reason.x !== false
+    this.pendingVirtualRender.y = this.pendingVirtualRender.y || reason.y !== false
     if (this.virtualRenderFrame) return
     this.virtualRenderFrame = requestAnimationFrame(() => {
+      const shouldRenderX = this.pendingVirtualRender.x
+      const shouldRenderY = this.pendingVirtualRender.y
+      this.pendingVirtualRender = { x: false, y: false }
       this.virtualRenderFrame = null
-      this.activeVirtualWindow = this.virtualWindow
-      this.renderTimelineSvgContent()
+      if (shouldRenderX) {
+        this.activeVirtualWindow = this.virtualWindow
+        this.renderTimelineSvgContent()
+      }
+      if (shouldRenderY) {
+        this.activeVirtualRowWindow = this.virtualRowWindow
+        this.renderLeftBodyContent()
+      }
       this.renderBodySvgContent()
     })
   }
@@ -616,20 +767,25 @@ export default class VanillaGantt {
   }
 
   appendGrid(svg) {
+    const xWindow = this.activeVirtualWindow || this.virtualWindow
+    const yWindow = this.activeVirtualRowWindow || this.virtualRowWindow
+    const viewportWidth = Math.max(1, xWindow.xEnd - xWindow.xStart)
+    const viewportHeight = Math.max(1, yWindow.yEnd - yWindow.yStart)
+
     if (this.grid.backgroundColor) {
-      svg.append(this.rect(0, 0, this.chartWidth, this.bodyHeight, this.grid.backgroundColor))
+      svg.append(this.rect(xWindow.xStart, yWindow.yStart, viewportWidth, viewportHeight, this.grid.backgroundColor))
     }
 
     this.backgroundShades.forEach(shade => {
-      svg.append(this.rect(shade.x, 0, shade.width, this.bodyHeight, shade.fill))
+      svg.append(this.rect(shade.x, yWindow.yStart, shade.width, viewportHeight, shade.fill))
     })
 
     this.visibleBackgroundRanges.forEach(range => {
       const rect = this.rect(
         this.timeToX(range.startDate),
-        0,
+        yWindow.yStart,
         this.durationWidth(range.startDate, range.endDate),
-        this.bodyHeight,
+        viewportHeight,
         range.color || range.fill || '#edf1f1'
       )
       rect.setAttribute('opacity', range.opacity === undefined ? 1 : range.opacity)
@@ -638,14 +794,14 @@ export default class VanillaGantt {
 
     this.verticalLines.forEach((item, index) => {
       const style = this.resolveStyle(this.grid.verticalLine, { index, dateIndex: index, date: item.startDate, ganttInstance: this })
-      const line = this.line(item.x, 0, item.x, this.bodyHeight, style.lineColor || '#e8eeee')
+      const line = this.line(item.x, yWindow.yStart, item.x, yWindow.yEnd, style.lineColor || '#e8eeee')
       this.applyLineStyle(line, style)
       svg.append(line)
     })
 
     this.rowLines.forEach((item, index) => {
       const style = this.resolveStyle(this.grid.horizontalLine, { index, ganttInstance: this })
-      const line = this.line(0, item.y, this.chartWidth, item.y, style.lineColor || '#edf1f2')
+      const line = this.line(xWindow.xStart, item.y, xWindow.xEnd, item.y, style.lineColor || '#edf1f2')
       this.applyLineStyle(line, style)
       svg.append(line)
     })
@@ -695,10 +851,11 @@ export default class VanillaGantt {
   appendMarkLine(svg, markLine) {
     const x = this.timeToX(markLine.date)
     const window = this.activeVirtualWindow || this.virtualWindow
+    const rowWindow = this.activeVirtualRowWindow || this.virtualRowWindow
     if (x < window.xStart || x > window.xEnd) return
 
     const style = markLine.style || {}
-    const line = this.line(x, 0, x, this.bodyHeight, style.lineColor || '#35cce0')
+    const line = this.line(x, rowWindow.yStart, x, rowWindow.yEnd, style.lineColor || '#35cce0')
     this.applyLineStyle(line, { lineDash: [4, 4], ...style })
     svg.append(line)
 
@@ -706,7 +863,7 @@ export default class VanillaGantt {
     const text = svgEl('text', 'vg-mark-line-text')
     attrs(text, {
       x: x + 6,
-      y: 16,
+      y: rowWindow.yStart + 16,
       fill: markLine.contentStyle && markLine.contentStyle.color ? markLine.contentStyle.color : style.lineColor || '#35cce0'
     })
     text.textContent = markLine.content
@@ -1027,9 +1184,13 @@ export default class VanillaGantt {
 
   clientPointToChart(clientX, clientY) {
     const rect = this.bodySvg.getBoundingClientRect()
+    const xWindow = this.activeVirtualWindow || this.virtualWindow
+    const yWindow = this.activeVirtualRowWindow || this.virtualRowWindow
+    const scaleX = rect.width ? (xWindow.xEnd - xWindow.xStart) / rect.width : 1
+    const scaleY = rect.height ? (yWindow.yEnd - yWindow.yStart) / rect.height : 1
     return {
-      x: clientX - rect.left,
-      y: clientY - rect.top
+      x: xWindow.xStart + (clientX - rect.left) * scaleX,
+      y: yWindow.yStart + (clientY - rect.top) * scaleY
     }
   }
 
@@ -1116,7 +1277,7 @@ export default class VanillaGantt {
       'data-task-key': this.taskKey(task)
     })
 
-    const row = this.rowById[task.__rowId]
+    const row = task.__rowRecord || this.rowById[task.__rowId]
     const payload = this.createTaskPayload(task, {
       row,
       width,
@@ -1831,7 +1992,8 @@ export default class VanillaGantt {
   }
 
   taskY(task) {
-    return this.rowTop(task.__rowId) + this.taskOffsetY(task)
+    const top = task.__rowTop === undefined ? this.rowTop(task.__rowId) : task.__rowTop
+    return top + this.taskOffsetY(task)
   }
 
   rowHeight(row) {
@@ -2102,6 +2264,14 @@ export default class VanillaGantt {
     return this.options.virtualScroll || {}
   }
 
+  get loadingOptions() {
+    return this.options.loading || {}
+  }
+
+  get isLoadingEnabled() {
+    return this.loadingOptions.enabled === true
+  }
+
   get tableWidth() {
     if (typeof this.taskListTable.tableWidth === 'number') return this.taskListTable.tableWidth
     return this.tableColumns.reduce((total, column) => total + this.columnWidth(column), 0)
@@ -2189,6 +2359,10 @@ export default class VanillaGantt {
     return this.virtualScroll.enabled !== false
   }
 
+  get isVerticalVirtualScrollEnabled() {
+    return this.isVirtualScrollEnabled && this.virtualScroll.rowEnabled !== false
+  }
+
   get horizontalViewportWidth() {
     const scrollWidth = this.scrollEl && this.scrollEl.clientWidth ? this.scrollEl.clientWidth : 0
     if (scrollWidth > 0) return scrollWidth
@@ -2198,6 +2372,17 @@ export default class VanillaGantt {
 
   get virtualBufferPx() {
     return Math.max(0, Number(this.virtualScroll.bufferPx === undefined ? 1200 : this.virtualScroll.bufferPx))
+  }
+
+  get virtualRowBufferPx() {
+    return Math.max(0, Number(this.virtualScroll.rowBufferPx === undefined ? this.virtualBufferPx : this.virtualScroll.rowBufferPx))
+  }
+
+  get verticalViewportHeight() {
+    const scrollHeight = this.scrollEl && this.scrollEl.clientHeight ? this.scrollEl.clientHeight : 0
+    if (scrollHeight > 0) return scrollHeight
+    const containerHeight = this.container && this.container.clientHeight ? this.container.clientHeight : 0
+    return Math.max(1, containerHeight - this.headerHeight || 800)
   }
 
   get virtualWindow() {
@@ -2219,6 +2404,22 @@ export default class VanillaGantt {
       timeStart: this.startTime + xStart / this.pxPerMs,
       timeEnd: this.startTime + xEnd / this.pxPerMs,
       renderedForLeft: this.scrollLeft
+    }
+  }
+
+  get virtualRowWindow() {
+    if (!this.isVerticalVirtualScrollEnabled) {
+      return {
+        yStart: 0,
+        yEnd: this.bodyHeight,
+        renderedForTop: this.scrollTop
+      }
+    }
+    const viewportHeight = this.verticalViewportHeight
+    return {
+      yStart: Math.max(0, this.scrollTop - this.virtualRowBufferPx),
+      yEnd: Math.min(this.bodyHeight, this.scrollTop + viewportHeight + this.virtualRowBufferPx),
+      renderedForTop: this.scrollTop
     }
   }
 
@@ -2245,11 +2446,7 @@ export default class VanillaGantt {
   }
 
   get rowLines() {
-    let top = 0
-    return this.visibleRows.map(row => {
-      top += this.rowHeight(row)
-      return { key: this.recordKey(row), y: top }
-    })
+    return this.renderedRowEntries.map(({ row, bottom }) => ({ key: this.recordKey(row), y: bottom }))
   }
 
   get backgroundShades() {
@@ -2290,8 +2487,33 @@ export default class VanillaGantt {
     return rows
   }
 
+  get visibleRowEntries() {
+    let top = 0
+    return this.visibleRows.map(row => {
+      const height = this.rowHeight(row)
+      const entry = {
+        row,
+        top,
+        bottom: top + height,
+        height
+      }
+      top += height
+      return entry
+    })
+  }
+
+  get renderedRowEntries() {
+    if (!this.isVerticalVirtualScrollEnabled) return this.visibleRowEntries
+    const window = this.activeVirtualRowWindow || this.virtualRowWindow
+    return this.visibleRowEntries.filter(entry => entry.bottom >= window.yStart && entry.top <= window.yEnd)
+  }
+
+  get renderedRows() {
+    return this.renderedRowEntries.map(entry => entry.row)
+  }
+
   get visibleRowIds() {
-    return this.visibleRows.reduce((ids, row) => {
+    return this.renderedRows.reduce((ids, row) => {
       ids[this.recordKey(row)] = true
       return ids
     }, {})
@@ -2353,18 +2575,27 @@ export default class VanillaGantt {
   }
 
   get visibleTasks() {
-    return this.allTasks.filter(task => {
-      const row = this.rowById[task.__rowId]
-      return row &&
-        !row.children &&
-        this.visibleRowIds[task.__rowId] &&
-        this.overlapsVirtualRange(this.taskStart(task), this.taskEnd(task))
+    const tasks = []
+    const tasksField = this.taskBar.tasksField
+    this.renderedRowEntries.forEach(({ row, top }) => {
+      if (row.children) return
+      const rowTasks = Array.isArray(row[tasksField]) ? row[tasksField] : []
+      rowTasks.forEach(task => {
+        if (!this.overlapsVirtualRange(this.taskStart(task), this.taskEnd(task))) return
+        tasks.push({
+          ...task,
+          __rowId: this.recordKey(row),
+          __rowRecord: row,
+          __rowTop: top
+        })
+      })
     })
+    return tasks
   }
 
   get parentTimelineTasks() {
     const tasks = []
-    this.visibleRows.forEach(row => {
+    this.renderedRowEntries.forEach(({ row, top }) => {
       if (!row.children || this.isExpanded(row)) return
       const descendantIds = this.getDescendantRecordKeys(row)
       const childTasks = this.allTasks.filter(task => {
@@ -2395,7 +2626,9 @@ export default class VanillaGantt {
         height: Math.max(28, this.rowHeight(row) - 12),
         offsetY: 6,
         parentAggregate: true,
-        __rowId: this.recordKey(row)
+        __rowId: this.recordKey(row),
+        __rowRecord: row,
+        __rowTop: top
       })
     })
     return tasks
