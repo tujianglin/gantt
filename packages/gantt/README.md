@@ -419,7 +419,7 @@ const options = {
 
 ## 依赖连接线
 
-通过 `dependency.links` 定义任务依赖。`from`、`to` 都可以是单个 id 或 id 数组。默认 `showLinks: false`，即不常驻显示连接线；点击某个任务后只显示它所在的一组连接关系。点击空白区域会取消连接状态。
+通过 `dependency.links` 定义任务依赖。`from`、`to` 都可以是单个 id 或 id 数组。默认 `showLinks: false`，即不常驻显示连接线；点击某个任务后只显示它所在的整条关联网络。点击空白区域会取消连接状态。
 
 ```js
 const options = {
@@ -722,7 +722,12 @@ taskBar: {
 | `showLinks` | `false` | 是否默认显示全部连接线 |
 | `highlightConnected` | `false` | 显示连接线时是否弱化无关任务 |
 | `dimOpacity` | `0.18` | 无关任务透明度 |
-| `linkCreatable` | `undefined` | 预留字段 |
+| `lineMode` | `{ pattern: 'solid', path: 'polyline' }` | 连接线模式。`pattern` 支持 `solid/dashed/dotted`，`path` 支持 `straight/polyline/curved/smoothstep/oblique` |
+| `linkCreatable` | `false` | 是否显示任务左右连接原点。开启后仅支持右侧输出点拖到其他任务左侧输入点 |
+| `linkCreateRules` | `{ allowDuplicate: false }` | 拖拽创建连接规则。支持限定输出端点、输入端点、指定 from/to 组合和自定义校验 |
+| `linkConnector` | `{ width: 14, height: 14 }` | 连接点渲染配置。支持 `customLayout/startLayout/finishLayout` 模板字符串自定义 |
+| `linkCreateDisabledTaskKeys` | `[]` | 兼容字段，同时禁止指定任务作为输出和输入端点。推荐使用 `linkCreateRules` |
+| `onLinkCreate` | `null` | 拖拽创建连接回调，返回 `link`、`fromTask`、`toTask`、`fromSide`、`toSide` |
 | `linkSelectable` | `undefined` | 预留字段 |
 | `linkDeletable` | `undefined` | 预留字段 |
 
@@ -741,6 +746,43 @@ taskBar: {
     lineWidth?: number
     lineDash?: number[]
   }
+}
+```
+
+`linkCreateRules`：
+
+```ts
+{
+  // 默认 false，同一个 from -> to 线路只能创建一次
+  allowDuplicate?: boolean
+  // 只有这些 task 可以作为右侧输出端点
+  fromTaskKeys?: Array<string | number>
+  // 只有这些 task 可以作为左侧输入端点
+  toTaskKeys?: Array<string | number>
+  // 禁止这些 task 作为右侧输出端点，不影响左侧输入端点
+  disabledFromTaskKeys?: Array<string | number>
+  // 禁止这些 task 作为左侧输入端点，不影响右侧输出端点
+  disabledToTaskKeys?: Array<string | number>
+  // 只允许指定 from -> to 组合
+  pairs?: Array<{
+    from: string | number | Array<string | number>
+    to: string | number | Array<string | number>
+  }>
+  // 返回 false 时拒绝创建
+  validate?: (context) => boolean
+}
+```
+
+`linkConnector`：
+
+```ts
+{
+  width?: number
+  height?: number
+  size?: number
+  customLayout?: (context) => string | Node
+  startLayout?: (context) => string | Node
+  finishLayout?: (context) => string | Node
 }
 ```
 

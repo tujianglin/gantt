@@ -311,6 +311,10 @@
   pointer-events: auto;
 }
 
+.vg-task-fo--dimmed > * {
+  opacity: var(--vg-dim-opacity, 0.18);
+}
+
 .vg-milestone-fo {
   overflow: visible;
   pointer-events: auto;
@@ -343,6 +347,41 @@
 
 .vg-link-path,
 .vg-link-arrow {
+  pointer-events: none;
+}
+
+.vg-link-connector {
+  pointer-events: auto;
+  transition: r 0.14s ease, stroke-width 0.14s ease;
+}
+
+.vg-link-connector-fo {
+  overflow: visible;
+}
+
+.vg-link-connector-content {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+}
+
+.vg-link-connector--start {
+  cursor: default;
+}
+
+.vg-link-connector--finish {
+  cursor: crosshair;
+}
+
+.vg-link-connector:hover {
+  r: 7;
+  stroke-width: 3;
+}
+
+.vg-link-create-path {
   pointer-events: none;
 }
 

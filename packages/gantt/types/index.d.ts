@@ -216,15 +216,86 @@ export type GanttDependencyType =
   | 'finish_to_finish'
   | 'start_to_finish'
 
+export type GanttLinkPattern = 'solid' | 'dashed' | 'dotted'
+
+export type GanttLinkPathMode = 'straight' | 'polyline' | 'curved' | 'smoothstep' | 'oblique'
+
+export interface GanttLinkLineMode {
+  pattern?: GanttLinkPattern
+  path?: GanttLinkPathMode
+}
+
 export interface GanttTaskLink {
   id?: string | number
   type?: GanttDependencyType
   from: string | number | Array<string | number>
   to: string | number | Array<string | number>
+  lineMode?: GanttLinkLineMode
+  linePattern?: GanttLinkPattern
+  pathMode?: GanttLinkPathMode
   linkLineStyle?: GanttLineStyle
   color?: string
   dashed?: boolean
   [key: string]: unknown
+}
+
+export interface GanttLinkCreateContext {
+  link: GanttTaskLink
+  fromTask: GanttTaskRecord
+  toTask: GanttTaskRecord
+  fromSide: 'start' | 'finish'
+  toSide: 'start' | 'finish'
+  event: PointerEvent
+  ganttInstance: VanillaGantt
+  gantt: VanillaGantt
+}
+
+export interface GanttLinkCreateValidateContext {
+  fromTask: GanttTaskRecord
+  toTask: GanttTaskRecord
+  fromKey: string | number
+  toKey: string | number
+  fromSide: 'finish'
+  toSide: 'start'
+  ganttInstance: VanillaGantt
+  gantt: VanillaGantt
+}
+
+export interface GanttLinkCreatePairRule {
+  from: string | number | Array<string | number>
+  to: string | number | Array<string | number>
+}
+
+export interface GanttLinkCreateRules {
+  allowDuplicate?: boolean
+  fromTaskKeys?: Array<string | number>
+  toTaskKeys?: Array<string | number>
+  disabledFromTaskKeys?: Array<string | number>
+  disabledToTaskKeys?: Array<string | number>
+  pairs?: GanttLinkCreatePairRule[]
+  validate?: (context: GanttLinkCreateValidateContext) => boolean
+}
+
+export interface GanttLinkConnectorLayoutContext extends GanttRenderContext {
+  task: GanttTaskRecord
+  taskRecord: GanttTaskRecord
+  taskKey?: string | number
+  side: 'start' | 'finish'
+  point: { x: number; y: number }
+  x: number
+  y: number
+  width: number
+  height: number
+  ganttInstance: VanillaGantt
+}
+
+export interface GanttLinkConnectorOptions {
+  width?: number
+  height?: number
+  size?: number
+  customLayout?: GanttRenderer<GanttLinkConnectorLayoutContext>
+  startLayout?: GanttRenderer<GanttLinkConnectorLayoutContext>
+  finishLayout?: GanttRenderer<GanttLinkConnectorLayoutContext>
 }
 
 export interface GanttDependencyOptions {
@@ -233,7 +304,12 @@ export interface GanttDependencyOptions {
   showLinks?: boolean
   highlightConnected?: boolean
   dimOpacity?: number
+  lineMode?: GanttLinkLineMode
   linkCreatable?: boolean
+  linkCreateRules?: GanttLinkCreateRules
+  linkConnector?: GanttLinkConnectorOptions
+  linkCreateDisabledTaskKeys?: Array<string | number>
+  onLinkCreate?: (context: GanttLinkCreateContext) => false | void
   linkSelectable?: boolean
   linkDeletable?: boolean
 }

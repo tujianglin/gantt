@@ -8,6 +8,7 @@ import AutoRowHeightDemo from './views/AutoRowHeightDemo.vue'
 import CapacityUsageDemo from './views/CapacityUsageDemo.vue'
 import RowDragDemo from './views/RowDragDemo.vue'
 import ContextMenuDemo from './views/ContextMenuDemo.vue'
+import LinkCreateDemo from './views/LinkCreateDemo.vue'
 import TaskInteractionDemo from './views/TaskInteractionDemo.vue'
 import WorkOrderMilestoneDemo from './views/WorkOrderMilestoneDemo.vue'
 import WorkOrderStatusDemo from './views/WorkOrderStatusDemo.vue'
@@ -84,6 +85,14 @@ export default new Router({
       component: ContextMenuDemo,
       meta: {
         title: '右键菜单'
+      }
+    },
+    {
+      path: '/link-create',
+      name: 'link-create',
+      component: LinkCreateDemo,
+      meta: {
+        title: '拖拽连线'
       }
     },
     {

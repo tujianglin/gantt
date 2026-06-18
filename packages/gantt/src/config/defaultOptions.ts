@@ -86,7 +86,24 @@ export const DEFAULT_OPTIONS = {
     linkLineStyle: null,
     showLinks: false,
     highlightConnected: false,
-    dimOpacity: 0.18
+    dimOpacity: 0.18,
+    lineMode: {
+      pattern: 'solid',
+      path: 'polyline'
+    },
+    linkCreatable: false,
+    linkCreateRules: {
+      allowDuplicate: false
+    },
+    linkConnector: {
+      width: 14,
+      height: 14,
+      customLayout: null,
+      startLayout: null,
+      finishLayout: null
+    },
+    linkCreateDisabledTaskKeys: [],
+    onLinkCreate: null
   },
   grid: {
     backgroundColor: '#f7fbfb',

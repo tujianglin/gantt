@@ -30,6 +30,8 @@ export default class VanillaGantt {
     this.activeTooltip = null
     this.activeLinkTaskKey = null
     this.activeLinkGroupKey = null
+    this.activeLinkTaskKeys = null
+    this.activeLinkCreate = null
     this.suppressClickUntil = 0
     this.suppressClickTaskKey = null
     this.seedExpandedRows(this.options.records)
@@ -686,6 +688,8 @@ export default class VanillaGantt {
     this.visibleLinks.forEach(link => {
       this.appendLink(svg, link)
     })
+
+    this.appendLinkConnectors(svg)
   }
 
   appendMarkLine(svg, markLine) {
@@ -714,7 +718,8 @@ export default class VanillaGantt {
     const to = this.taskLayoutByKey[link.to]
     if (!from || !to) return
 
-    const route = this.linkRoute(link.type, from, to)
+    const lineMode = this.linkLineMode(link)
+    const route = this.linkRoute(link.type, from, to, lineMode.path)
     const style = {
       ...(this.dependency.linkLineStyle || {}),
       ...(link.linkLineStyle || {})
@@ -727,13 +732,347 @@ export default class VanillaGantt {
       'stroke-linecap': 'round'
     })
     this.applyLineStyle(path, { lineWidth: 2, ...style })
-    if (link.dashed) path.setAttribute('stroke-dasharray', '6 4')
+    this.applyLinkPattern(path, lineMode.pattern, link)
+    const startCircle = this.circle(route.start.x, route.start.y, 4, color)
+    const arrow = this.arrow(route.end.x, route.end.y, route.direction, color)
+    if (this.isLinkDimmed(link)) {
+      const opacity = String(this.dependency.dimOpacity === undefined ? 0.18 : this.dependency.dimOpacity)
+      path.setAttribute('opacity', opacity)
+      startCircle.setAttribute('opacity', opacity)
+      arrow.setAttribute('opacity', opacity)
+    }
     svg.append(path)
-    svg.append(this.circle(route.start.x, route.start.y, 4, color))
-    svg.append(this.arrow(route.end.x, route.end.y, route.direction, color))
+    svg.append(startCircle)
+    svg.append(arrow)
   }
 
-  linkRoute(type, from, to) {
+  linkLineMode(link = {}) {
+    const globalMode = this.dependency.lineMode || {}
+    const linkMode = link.lineMode || {}
+    const pattern = link.linePattern || linkMode.pattern || (link.dashed ? 'dashed' : globalMode.pattern || 'solid')
+    const path = link.pathMode || linkMode.path || globalMode.path || 'polyline'
+    return { pattern, path }
+  }
+
+  applyLinkPattern(path, pattern = 'solid', link = {}) {
+    if (link.dashed || pattern === 'dashed') {
+      path.setAttribute('stroke-dasharray', '6 4')
+      return
+    }
+    if (pattern === 'dotted') {
+      path.setAttribute('stroke-dasharray', '1 6')
+      path.setAttribute('stroke-linecap', 'round')
+      return
+    }
+    path.removeAttribute('stroke-dasharray')
+  }
+
+  linkCreateRules() {
+    return this.dependency.linkCreateRules || {}
+  }
+
+  isSameKey(left, right) {
+    return String(left) === String(right)
+  }
+
+  keyInList(list, key) {
+    if (!Array.isArray(list) || !list.length) return false
+    return list.some(item => this.isSameKey(item, key))
+  }
+
+  isLinkCreateDisabledTask(task) {
+    const disabledKeys = this.dependency.linkCreateDisabledTaskKeys || []
+    return this.keyInList(disabledKeys, this.taskKey(task))
+  }
+
+  isConnectorAllowed(task, side) {
+    if (!task) return false
+    const key = this.taskKey(task)
+    const rules = this.linkCreateRules()
+    if (this.isLinkCreateDisabledTask(task)) return false
+
+    if (side === 'finish') {
+      if (this.keyInList(rules.disabledFromTaskKeys, key)) return false
+      if (Array.isArray(rules.fromTaskKeys) && rules.fromTaskKeys.length) {
+        return this.keyInList(rules.fromTaskKeys, key)
+      }
+      return true
+    }
+
+    if (this.keyInList(rules.disabledToTaskKeys, key)) return false
+    if (Array.isArray(rules.toTaskKeys) && rules.toTaskKeys.length) {
+      return this.keyInList(rules.toTaskKeys, key)
+    }
+    return true
+  }
+
+  isAllowedLinkPair(fromKey, toKey) {
+    const rules = this.linkCreateRules()
+    if (!Array.isArray(rules.pairs) || !rules.pairs.length) return true
+    return rules.pairs.some(pair => {
+      if (!pair) return false
+      const fromList = toKeyList(pair.from)
+      const toList = toKeyList(pair.to)
+      return fromList.some(from => this.isSameKey(from, fromKey)) && toList.some(to => this.isSameKey(to, toKey))
+    })
+  }
+
+  isDuplicateLink(fromKey, toKey) {
+    return this.normalizedLinks.some(link => this.isSameKey(link.from, fromKey) && this.isSameKey(link.to, toKey))
+  }
+
+  canCreateLink(fromTask, toTask) {
+    const fromKey = this.taskKey(fromTask)
+    const toKey = this.taskKey(toTask)
+    const rules = this.linkCreateRules()
+    if (fromKey === undefined || fromKey === null || toKey === undefined || toKey === null) return false
+    if (this.isSameKey(fromKey, toKey)) return false
+    if (!this.isConnectorAllowed(fromTask, 'finish')) return false
+    if (!this.isConnectorAllowed(toTask, 'start')) return false
+    if (!this.isAllowedLinkPair(fromKey, toKey)) return false
+    if (rules.allowDuplicate !== true && this.isDuplicateLink(fromKey, toKey)) return false
+    if (typeof rules.validate === 'function') {
+      return rules.validate({
+        fromTask,
+        toTask,
+        fromKey,
+        toKey,
+        fromSide: 'finish',
+        toSide: 'start',
+        ganttInstance: this,
+        gantt: this
+      }) !== false
+    }
+    return true
+  }
+
+  appendLinkConnectors(svg) {
+    if (!this.dependency.linkCreatable) return
+    this.renderTasks.forEach(task => {
+      const key = this.taskKey(task)
+      const layout = this.taskLayoutByKey[key]
+      if (key === undefined || key === null || !layout) return
+      ;['start', 'finish'].forEach(side => {
+        if (!this.isConnectorAllowed(task, side)) return
+        const point = this.linkConnectorPoint(layout, side)
+        svg.append(this.renderLinkConnector(task, side, point))
+      })
+    })
+  }
+
+  renderLinkConnector(task, side, point) {
+    const connector = this.dependency.linkConnector || {}
+    const sideRenderer = side === 'start' ? connector.startLayout : connector.finishLayout
+    const renderer = sideRenderer || connector.customLayout
+    const key = this.taskKey(task)
+    const width = Number(connector.width || (connector.size || 14))
+    const height = Number(connector.height || (connector.size || 14))
+    const payload = {
+      task,
+      taskRecord: task,
+      taskKey: key,
+      side,
+      point,
+      x: point.x,
+      y: point.y,
+      width,
+      height,
+      ganttInstance: this,
+      gantt: this
+    }
+    const custom = this.resolveContent(renderer, payload)
+
+    if (!custom) {
+      const circle = this.circle(point.x, point.y, 5, '#fff')
+      circle.classList.add('vg-link-connector', `vg-link-connector--${side}`)
+      attrs(circle, {
+        'data-task-key': key,
+        'data-link-side': side,
+        stroke: side === 'start' ? '#40c51b' : '#168dff',
+        'stroke-width': 2
+      })
+      this.bindLinkConnector(circle, task, side)
+      return circle
+    }
+
+    const fo = svgEl('foreignObject', `vg-link-connector vg-link-connector-fo vg-link-connector--${side}`)
+    attrs(fo, {
+      x: point.x - width / 2,
+      y: point.y - height / 2,
+      width,
+      height,
+      'data-task-key': key,
+      'data-link-side': side
+    })
+    const content = el('div', `vg-link-connector vg-link-connector-content vg-link-connector--${side}`)
+    attrs(content, {
+      'data-task-key': key,
+      'data-link-side': side
+    })
+    content.append(custom)
+    fo.append(content)
+    this.bindLinkConnector(fo, task, side)
+    return fo
+  }
+
+  bindLinkConnector(node, task, side) {
+    if (side !== 'finish') return
+    const onPointerDown = event => this.startLinkCreate(task, side, event)
+    node.addEventListener('pointerdown', onPointerDown)
+    this.virtualDisposers.push(() => node.removeEventListener('pointerdown', onPointerDown))
+  }
+
+  startLinkCreate(task, side, event) {
+    if (event.button !== undefined && event.button !== 0) return
+    if (side !== 'finish') return
+    if (!this.isConnectorAllowed(task, side)) return
+    const taskKey = this.taskKey(task)
+    const layout = this.taskLayoutByKey[taskKey]
+    if (!layout || !this.bodySvg) return
+
+    const start = this.linkConnectorPoint(layout, side)
+    const path = this.path('', '#168dff')
+    path.classList.add('vg-link-create-path')
+    attrs(path, {
+      fill: 'none',
+      'stroke-width': 2,
+      'pointer-events': 'none'
+    })
+    this.applyLinkPattern(path, this.linkLineMode({}).pattern)
+    this.bodySvg.append(path)
+    this.activeLinkCreate = {
+      fromTask: task,
+      fromKey: taskKey,
+      fromSide: side,
+      start,
+      path
+    }
+
+    const onMove = moveEvent => this.moveLinkCreate(moveEvent)
+    const onUp = upEvent => {
+      document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('pointerup', onUp)
+      document.removeEventListener('pointercancel', onUp)
+      this.endLinkCreate(upEvent)
+    }
+    document.addEventListener('pointermove', onMove)
+    document.addEventListener('pointerup', onUp)
+    document.addEventListener('pointercancel', onUp)
+    this.virtualDisposers.push(() => {
+      document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('pointerup', onUp)
+      document.removeEventListener('pointercancel', onUp)
+    })
+    this.moveLinkCreate(event)
+    event.preventDefault()
+    event.stopPropagation()
+  }
+
+  moveLinkCreate(event) {
+    const drag = this.activeLinkCreate
+    if (!drag || !drag.path) return
+    const point = this.clientPointToChart(event.clientX, event.clientY)
+    drag.path.setAttribute('d', this.linkDraftRoute(drag.start, point))
+  }
+
+  endLinkCreate(event) {
+    const drag = this.activeLinkCreate
+    if (!drag) return
+    const target = this.findTaskAtClientPoint(event.clientX, event.clientY)
+    if (drag.path && drag.path.parentNode) drag.path.parentNode.removeChild(drag.path)
+    this.activeLinkCreate = null
+
+    if (!target || target.side !== 'start') return
+    if (!this.canCreateLink(drag.fromTask, target.task)) return
+    const link = {
+      id: `link-${drag.fromKey}-${target.taskKey}-${Date.now()}`,
+      from: drag.fromKey,
+      to: target.taskKey,
+      type: this.linkTypeFromSides(drag.fromSide, target.side),
+      fromSide: drag.fromSide,
+      toSide: target.side
+    }
+    const payload = {
+      link,
+      fromTask: drag.fromTask,
+      toTask: target.task,
+      fromSide: drag.fromSide,
+      toSide: target.side,
+      event,
+      ganttInstance: this,
+      gantt: this
+    }
+
+    if (typeof this.dependency.onLinkCreate === 'function' && this.dependency.onLinkCreate(payload) === false) return
+    this.dependency.links = [...(this.dependency.links || []), link]
+    this.renderBodySvgContent()
+  }
+
+  findTaskAtClientPoint(clientX, clientY) {
+    const elements = document.elementsFromPoint(clientX, clientY)
+    for (const element of elements) {
+      const connector = element.closest && element.closest('.vg-link-connector--start')
+      if (!connector) continue
+      const taskKey = connector.getAttribute('data-task-key')
+      const task = this.renderTasks.find(item => String(this.taskKey(item)) === String(taskKey))
+      if (!task || !this.isConnectorAllowed(task, 'start')) continue
+      return {
+        task,
+        taskKey,
+        side: 'start'
+      }
+    }
+    return null
+  }
+
+  clientPointToChart(clientX, clientY) {
+    const rect = this.bodySvg.getBoundingClientRect()
+    return {
+      x: clientX - rect.left,
+      y: clientY - rect.top
+    }
+  }
+
+  linkConnectorPoint(layout, side) {
+    return {
+      x: side === 'start' ? layout.x : layout.x + layout.width,
+      y: layout.centerY
+    }
+  }
+
+  linkDraftRoute(start, end) {
+    const mode = this.linkLineMode({}).path
+    return this.createLinkPath(start, end, mode)
+  }
+
+  createLinkPath(start, end, mode = 'polyline') {
+    const direction = end.x >= start.x ? 1 : -1
+    const gap = Math.abs(end.x - start.x)
+    if (mode === 'straight' || mode === 'oblique') {
+      return `M ${start.x} ${start.y} L ${end.x} ${end.y}`
+    }
+    if (mode === 'curved') {
+      const c1 = start.x + direction * Math.max(24, gap / 2)
+      const c2 = end.x - direction * Math.max(24, gap / 2)
+      return `M ${start.x} ${start.y} C ${c1} ${start.y} ${c2} ${end.y} ${end.x} ${end.y}`
+    }
+    const elbow = start.x + direction * Math.max(24, gap / 2)
+    if (mode === 'smoothstep' && Math.abs(end.y - start.y) > 2) {
+      const verticalDirection = end.y >= start.y ? 1 : -1
+      const radius = Math.min(14, Math.abs(end.y - start.y) / 2, Math.max(8, gap / 4))
+      return `M ${start.x} ${start.y} H ${elbow - direction * radius} C ${elbow - direction * radius / 2} ${start.y} ${elbow} ${start.y + verticalDirection * radius / 2} ${elbow} ${start.y + verticalDirection * radius} V ${end.y - verticalDirection * radius} C ${elbow} ${end.y - verticalDirection * radius / 2} ${elbow + direction * radius / 2} ${end.y} ${elbow + direction * radius} ${end.y} H ${end.x}`
+    }
+    return `M ${start.x} ${start.y} H ${elbow} V ${end.y} H ${end.x}`
+  }
+
+  linkTypeFromSides(fromSide, toSide) {
+    if (fromSide === 'start' && toSide === 'start') return 'start_to_start'
+    if (fromSide === 'start' && toSide === 'finish') return 'start_to_finish'
+    if (fromSide === 'finish' && toSide === 'finish') return 'finish_to_finish'
+    return 'finish_to_start'
+  }
+
+  linkRoute(type, from, to, pathMode = 'polyline') {
     const fromStart = from.x
     const fromEnd = from.x + from.width
     const toStart = to.x
@@ -757,15 +1096,11 @@ export default class VanillaGantt {
     }
 
     const direction = end.x >= start.x ? 1 : -1
-    const gap = Math.abs(end.x - start.x)
-    const elbow = direction > 0
-      ? start.x + Math.max(20, gap / 2)
-      : start.x + 28
     return {
       start,
       end,
       direction,
-      d: `M ${start.x} ${start.y} H ${elbow} V ${end.y} H ${end.x}`
+      d: this.createLinkPath(start, end, pathMode)
     }
   }
 
@@ -777,7 +1112,8 @@ export default class VanillaGantt {
       x: this.timeToX(this.taskStart(task)),
       y: this.taskY(task),
       width,
-      height
+      height,
+      'data-task-key': this.taskKey(task)
     })
 
     const row = this.rowById[task.__rowId]
@@ -792,8 +1128,12 @@ export default class VanillaGantt {
     fo.append(custom || this.renderDefaultTask(task))
     this.scheduleTaskForeignObjectMeasure(fo, height)
     if (this.isTaskDimmed(task)) {
+      const opacity = String(this.dependency.dimOpacity === undefined ? 0.18 : this.dependency.dimOpacity)
       fo.classList.add('vg-task-fo--dimmed')
-      fo.style.opacity = String(this.dependency.dimOpacity === undefined ? 0.18 : this.dependency.dimOpacity)
+      fo.style.setProperty('--vg-dim-opacity', opacity)
+      Array.from(fo.children).forEach(child => {
+        if (child && child.style) child.style.opacity = opacity
+      })
     }
     this.bindTaskInteractions(fo, task)
     return fo
@@ -869,6 +1209,8 @@ export default class VanillaGantt {
     }
 
     const onClick = event => {
+      if (event.__vgTaskClickHandled) return
+      event.__vgTaskClickHandled = true
       const taskKey = this.taskKey(task)
       if (this.suppressClickTaskKey === taskKey && Date.now() < this.suppressClickUntil) {
         event.preventDefault()
@@ -881,6 +1223,8 @@ export default class VanillaGantt {
       if (shouldRender) this.render()
     }
     const onContextMenu = event => {
+      if (event.__vgTaskContextMenuHandled) return
+      event.__vgTaskContextMenuHandled = true
       if (typeof this.taskBar.onContextMenu !== 'function') return
       event.preventDefault()
       this.callTaskCallback('onContextMenu', task, event)
@@ -897,22 +1241,31 @@ export default class VanillaGantt {
       this.hideTaskTooltip()
     }
     const onPointerDown = event => {
+      if (event.__vgTaskPointerDownHandled) return
+      event.__vgTaskPointerDownHandled = true
       this.startTaskDrag(node, task, event)
     }
 
-    node.addEventListener('click', onClick)
-    node.addEventListener('contextmenu', onContextMenu)
+    const eventTargets = [node]
+    Array.from(node.children || []).forEach(child => eventTargets.push(child))
+
+    eventTargets.forEach(target => {
+      target.addEventListener('click', onClick)
+      target.addEventListener('contextmenu', onContextMenu)
+      target.addEventListener('pointerdown', onPointerDown)
+    })
     node.addEventListener('mouseenter', onMouseEnter)
     node.addEventListener('mousemove', onMouseMove)
     node.addEventListener('mouseleave', onMouseLeave)
-    node.addEventListener('pointerdown', onPointerDown)
     this.virtualDisposers.push(() => {
-      node.removeEventListener('click', onClick)
-      node.removeEventListener('contextmenu', onContextMenu)
+      eventTargets.forEach(target => {
+        target.removeEventListener('click', onClick)
+        target.removeEventListener('contextmenu', onContextMenu)
+        target.removeEventListener('pointerdown', onPointerDown)
+      })
       node.removeEventListener('mouseenter', onMouseEnter)
       node.removeEventListener('mousemove', onMouseMove)
       node.removeEventListener('mouseleave', onMouseLeave)
-      node.removeEventListener('pointerdown', onPointerDown)
     })
   }
 
@@ -1429,25 +1782,34 @@ export default class VanillaGantt {
   isTaskDimmed(task) {
     if (!this.dependency.highlightConnected) return false
     const key = this.taskKey(task)
-    if (!key) return false
+    if (key === undefined || key === null) return false
+    if (this.activeLinkTaskKeys) return !this.activeLinkTaskKeys[key]
     if (!this.visibleLinks.length) return false
     return !this.connectedTaskKeys[key]
   }
 
+  isLinkDimmed(link) {
+    if (!this.dependency.highlightConnected || !this.activeLinkTaskKeys) return false
+    return !this.activeLinkTaskKeys[link.from] || !this.activeLinkTaskKeys[link.to]
+  }
+
   activateTaskLinkGroup(task) {
     const taskKey = this.taskKey(task)
-    const groupKey = this.firstLinkGroupKeyByTask(taskKey)
-    const nextTaskKey = groupKey ? taskKey : null
-    const changed = this.activeLinkTaskKey !== nextTaskKey || this.activeLinkGroupKey !== groupKey
+    const network = this.linkNetworkByTask(taskKey)
+    const nextTaskKey = network ? taskKey : null
+    const nextGroupKey = network ? network.key : null
+    const changed = this.activeLinkTaskKey !== nextTaskKey || this.activeLinkGroupKey !== nextGroupKey
     this.activeLinkTaskKey = nextTaskKey
-    this.activeLinkGroupKey = groupKey
+    this.activeLinkGroupKey = nextGroupKey
+    this.activeLinkTaskKeys = network ? network.taskKeys : null
     return changed
   }
 
   clearActiveLinkGroup() {
-    if (!this.activeLinkTaskKey && !this.activeLinkGroupKey) return false
+    if (!this.activeLinkTaskKey && !this.activeLinkGroupKey && !this.activeLinkTaskKeys) return false
     this.activeLinkTaskKey = null
     this.activeLinkGroupKey = null
+    this.activeLinkTaskKeys = null
     return true
   }
 
@@ -2084,14 +2446,15 @@ export default class VanillaGantt {
   }
 
   get activeNormalizedLinks() {
-    if (this.activeLinkGroupKey) {
-      return this.normalizedLinks.filter(link => link.__groupKey === this.activeLinkGroupKey)
+    if (this.activeLinkTaskKeys) {
+      return this.normalizedLinks
     }
     return this.dependency.showLinks === true ? this.normalizedLinks : []
   }
 
   get normalizedLinks() {
     const links = []
+    const used = new Set()
     ;(this.dependency.links || []).forEach((link, linkIndex) => {
       const fromKeys = toKeyList(link.from)
       const toKeys = toKeyList(link.to)
@@ -2101,6 +2464,9 @@ export default class VanillaGantt {
       fromKeys.forEach(from => {
         toKeys.forEach(to => {
           if (from === undefined || from === null || to === undefined || to === null) return
+          const uniqueKey = `${String(from)}->${String(to)}`
+          if (used.has(uniqueKey)) return
+          used.add(uniqueKey)
           links.push({
             ...link,
             from,
@@ -2117,6 +2483,33 @@ export default class VanillaGantt {
     if (taskKey === undefined || taskKey === null) return null
     const link = this.normalizedLinks.find(item => item.from === taskKey || item.to === taskKey)
     return link ? link.__groupKey : null
+  }
+
+  linkNetworkByTask(taskKey) {
+    if (taskKey === undefined || taskKey === null) return null
+    const links = this.normalizedLinks
+    if (!links.some(link => this.isSameKey(link.from, taskKey) || this.isSameKey(link.to, taskKey))) return null
+
+    const taskKeys = Object.create(null)
+    const queue = [taskKey]
+    taskKeys[taskKey] = true
+
+    while (queue.length) {
+      const current = queue.shift()
+      links.forEach(link => {
+        if (!this.isSameKey(link.from, current) && !this.isSameKey(link.to, current)) return
+        ;[link.from, link.to].forEach(nextKey => {
+          if (taskKeys[nextKey]) return
+          taskKeys[nextKey] = true
+          queue.push(nextKey)
+        })
+      })
+    }
+
+    return {
+      key: Object.keys(taskKeys).sort().join('|'),
+      taskKeys
+    }
   }
 
   get connectedTaskKeys() {
