@@ -1,6 +1,6 @@
 {
   "name": "@wimi/gantt",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Framework-agnostic SVG scheduling gantt chart.",
   "type": "module",
   "main": "dist/VanillaGantt.cjs",

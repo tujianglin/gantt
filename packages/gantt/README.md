@@ -493,7 +493,7 @@ gantt.destroy()
 | `taskKeyField` | `string` | `'id'` | 任务唯一 key 字段 |
 | `minDate` | `string \| number \| Date` | 自动取最小任务开始时间 | 时间轴开始时间 |
 | `maxDate` | `string \| number \| Date` | 自动取最大任务结束时间 | 时间轴结束时间 |
-| `rowHeight` | `number \| 'auto'` | `78` | 默认行高。设置为 `'auto'` 时按当前行任务的 `offsetY + height` 自动撑开 |
+| `rowHeight` | `number \| 'auto'` | `78` | 默认行高。设置为 `'auto'` 时按当前行任务的 `offsetY + height` 自动撑开。大量自定义 task 时优先配置 `record.height`、`task.height` 或 `rowHeight: 'auto'`，可减少 `foreignObject` 测量 |
 | `taskHeight` | `number` | `36` | 默认任务条高度 |
 | `headerRowHeight` | `number` | `24` | 默认时间刻度行高 |
 | `taskListTable` | `GanttTaskListTableOptions` | 见下方 | 左侧表格配置 |
@@ -502,7 +502,9 @@ gantt.destroy()
 | `dependency` | `GanttDependencyOptions` | 见下方 | 依赖连接线配置 |
 | `grid` | `GanttGridOptions` | 见下方 | 时间区网格和背景配置 |
 | `virtualScroll` | `{ enabled?: boolean, bufferPx?: number, rowEnabled?: boolean, rowBufferPx?: number }` | `{ enabled: false, bufferPx: 1200, rowEnabled: true, rowBufferPx: 4800 }` | 虚拟渲染。开启后 x 轴只渲染视口附近时间内容，y 轴只渲染视口附近行 |
-| `loading` | `{ enabled?: boolean, text?: string, className?: string, customLayout?: renderer }` | `{ enabled: false, text: '加载中...' }` | `setOptions` 重渲染时显示加载层。`customLayout` 支持模板字符串自定义 |
+| `loading` | `{ enabled?: boolean, text?: string, className?: string, customLayout?: renderer, bodyRenderSlice?: boolean, bodyRenderSliceBudget?: number }` | `{ enabled: false, text: '加载中...', bodyRenderSlice: true, bodyRenderSliceBudget: 8 }` | `setOptions` 重渲染时显示加载层。`customLayout` 支持模板字符串自定义；开启 loading 时默认按帧分片追加 body SVG 节点，降低大刻度切换阻塞 |
+| `scrollbar` | `{ alwaysVisible?: boolean, width?: number, height?: number, dragRenderDelay?: number, dragRenderMaxWait?: number }` | `{ alwaysVisible: false, width: 10, height: 10, dragRenderDelay: 80, dragRenderMaxWait: 260 }` | 主滚动区滚动条配置。支持常显、设置滚动条宽高，以及自定义滚动条拖拽时虚拟渲染的空闲延迟和最大等待 |
+| `performance` | `{ enabled?: boolean, console?: boolean, onRender?: (payload) => void }` | `{ enabled: false, console: false }` | 性能日志配置。开启后可获取 body 渲染耗时、snapshot 耗时、可视任务数、连接线数和 SVG 节点数 |
 | `markLine` | `GanttMarkLine \| GanttMarkLine[] \| null` | `null` | 标记线 |
 | `onScroll` | `(payload) => void` | `null` | 滚动回调，返回 `scrollLeft`、`scrollTop` |
 
@@ -601,6 +603,7 @@ renderCell: ({ value }) => `
 | --- | --- | --- | --- |
 | `backgroundColor` | `string` | `'#fff'` | 时间轴区域背景 |
 | `colWidth` | `number` | `56` | 默认基础刻度列宽 |
+| `minLabelWidth` | `number` | `0` | 最小刻度文案显示宽度。大于 0 时，刻度宽度低于该值只渲染空刻度，减少密集时间轴节点开销 |
 | `style` | `GanttTimelineHeaderStyle` | `null` | 时间刻度默认样式 |
 | `scales` | `GanttTimelineScale[]` | 天 + 2 小时 | 时间轴刻度行 |
 | `customLayout` | `renderer` | `null` | 全局刻度自定义模板 |
@@ -612,6 +615,7 @@ renderCell: ({ value }) => `
 | `unit` | `minute`、`hour`、`day`、`week`、`month`、`year` |
 | `step` | 刻度步长，例如 `minute + 15` 表示 15 分钟 |
 | `colWidth` | 当前刻度作为基础刻度时的列宽 |
+| `minLabelWidth` | 当前刻度行的最小文案显示宽度，会覆盖 `timelineHeader.minLabelWidth` |
 | `rowHeight` | 当前刻度行高 |
 | `startOfWeek` | 周起始：`monday` 或 `sunday` |
 | `visible` | 是否显示当前刻度行 |

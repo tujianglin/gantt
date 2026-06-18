@@ -29,6 +29,21 @@
         <input v-model.number="bufferPx" type="number" min="0" step="200" />
       </label>
       <label>
+        <span>滚动条</span>
+        <select v-model="scrollbarAlwaysVisible">
+          <option :value="true">常显</option>
+          <option :value="false">自动</option>
+        </select>
+      </label>
+      <label>
+        <span>滚动条宽</span>
+        <input v-model.number="scrollbarWidth" type="number" min="0" max="30" step="1" />
+      </label>
+      <label>
+        <span>滚动条高</span>
+        <input v-model.number="scrollbarHeight" type="number" min="0" max="30" step="1" />
+      </label>
+      <label>
         <span>行数</span>
         <input v-model.number="rowCount" type="number" min="1" max="50000" step="1000" />
       </label>
@@ -290,6 +305,9 @@ export default {
       gantt: null,
       virtualEnabled: true,
       bufferPx: 2000,
+      scrollbarAlwaysVisible: true,
+      scrollbarWidth: 12,
+      scrollbarHeight: 12,
       rowCount: 10000,
       scaleKey: '15m',
       scaleOptions,
@@ -306,6 +324,13 @@ export default {
         loading: {
           enabled: true,
           customLayout: this.renderLoading
+        },
+        scrollbar: {
+          alwaysVisible: true,
+          width: 12,
+          height: 12,
+          dragRenderDelay: 80,
+          dragRenderMaxWait: 260
         },
         taskListTable: {
           tableWidth: 260,
@@ -348,6 +373,9 @@ export default {
       this.options.virtualScroll.bufferPx = value
       this.syncGantt()
     },
+    scrollbarAlwaysVisible: 'syncScrollbar',
+    scrollbarWidth: 'syncScrollbar',
+    scrollbarHeight: 'syncScrollbar',
     scaleKey(value) {
       const scale = this.scaleOptions.find(item => item.key === value)
       if (!scale) return
@@ -366,6 +394,16 @@ export default {
   methods: {
     syncGantt() {
       if (this.gantt) this.gantt.setOptions(this.options)
+    },
+    syncScrollbar() {
+      this.options.scrollbar = {
+        alwaysVisible: this.scrollbarAlwaysVisible,
+        width: this.scrollbarWidth,
+        height: this.scrollbarHeight,
+        dragRenderDelay: 80,
+        dragRenderMaxWait: 260
+      }
+      this.syncGantt()
     },
     applyRowCount() {
       const count = Math.max(1, Math.min(50000, Number(this.rowCount) || 1))
@@ -429,6 +467,7 @@ export default {
   min-height: 52px;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   padding: 10px 12px;
   border: 1px solid #dbe6ea;

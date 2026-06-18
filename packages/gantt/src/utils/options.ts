@@ -44,6 +44,20 @@ export function mergeOptions(base, patch) {
       ...(base.virtualScroll || {}),
       ...(patch.virtualScroll || {})
     },
+    loading: {
+      ...(base.loading || {}),
+      ...(patch.loading || {})
+    },
+    scrollbar: {
+      ...(base.scrollbar || {}),
+      ...(patch.scrollbar || {})
+    },
+    performance: {
+      ...(base.performance || {}),
+      ...(patch.performance || {})
+    },
+    markLine: patch.markLine === undefined ? base.markLine : patch.markLine,
+    onScroll: patch.onScroll === undefined ? base.onScroll : patch.onScroll,
     records: patch.records || base.records || []
   }
 }

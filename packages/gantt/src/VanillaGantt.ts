@@ -1,8 +1,11 @@
 import './vanilla-gantt.css'
 import { DEFAULT_MILESTONE_TOOLTIP, DEFAULT_OPTIONS, DEFAULT_TASK_TOOLTIP } from './config/defaultOptions'
+import { buildDependencySnapshot, linkNetworkByTask } from './core/dependency'
+import { buildRenderSnapshot } from './core/renderSnapshot'
+import { createTaskLayoutByKey, getTaskLayout } from './core/taskLayout'
+import { getVirtualRowWindow, getVirtualWindow, renderedEntriesInWindow, shouldRefreshVirtualRows, shouldRefreshVirtualWindow } from './core/virtualScroll'
 import { HOUR } from './utils/constants'
 import { attrs, el, svgEl } from './utils/dom'
-import { toKeyList } from './utils/list'
 import { mergeOptions } from './utils/options'
 import { alignToFlex, applyTableHeaderStyle, applyTimelineStyle, applyTimelineStyleToContent } from './utils/style'
 import { formatDateTime, formatLocalDateTime, toTime } from './utils/time'
@@ -24,16 +27,32 @@ export default class VanillaGantt {
     this.virtualDisposers = []
     this.leftVirtualDisposers = []
     this.taskMeasureFrames = []
+    this.taskMeasureQueue = []
+    this.taskMeasureFrame = null
+    this.taskMeasuredHeightByKey = {}
+    this.bodyRenderFrame = null
+    this.bodyRenderToken = 0
+    this.useSlicedBodyRender = false
+    this.pendingHideLoadingAfterBodyRender = false
     this.virtualRenderFrame = null
     this.optionsRenderFrame = null
     this.hideLoadingFrame = null
     this.pendingVirtualRender = { x: false, y: false }
+    this.pendingScrollbarDragRender = { x: false, y: false }
     this.loadingVisible = false
+    this.customScrollbarUpdater = null
+    this.customScrollbarDragActive = false
+    this.scrollbarDragRenderTimer = null
+    this.scrollbarDragRenderStartedAt = 0
+    this.rowCache = null
+    this.timelineUnitsCache = null
+    this.currentRenderSnapshot = null
     this.activeVirtualWindow = null
     this.activeVirtualRowWindow = null
     this.activeDrag = null
     this.activeRowDragKey = null
     this.activeTooltip = null
+    this.hoveredTaskKey = null
     this.activeLinkTaskKey = null
     this.activeLinkGroupKey = null
     this.activeLinkTaskKeys = null
@@ -45,11 +64,60 @@ export default class VanillaGantt {
   }
 
   setOptions(options = {}) {
-    const previousRecords = this.options.records
-    this.options = mergeOptions(this.options, options)
+    const previousOptions = this.options
+    const previousRecords = previousOptions.records
+    const previousHeaderHeight = this.headerHeight
+    const previousScrollbarAlwaysVisible = (previousOptions.scrollbar || {}).alwaysVisible
+    const change = this.classifyOptionPatch(options)
+    const nextOptions = mergeOptions(this.options, options)
+    this.options = nextOptions
+    if (change.timelineChanged) this.timelineUnitsCache = null
+    if (options.records || options.taskBar) this.taskMeasuredHeightByKey = {}
+    if (change.recordsChanged) this.invalidateRowCache()
     if (options.records && options.records !== previousRecords) {
       this.seedExpandedRows(options.records, true)
     }
+
+    if (this.canPatchScrollbarOnly(options, previousScrollbarAlwaysVisible)) {
+      this.syncScrollbarLayout()
+      return
+    }
+
+    if (this.canPatchInteractionOnly(change)) {
+      this.patchInteractionOptions()
+      return
+    }
+
+    if (this.canPatchTableLayoutOnly(change)) {
+      this.syncTableLayout()
+      return
+    }
+
+    if (this.canPatchTimeRangeOnly(change, previousHeaderHeight)) {
+      if (this.isLoadingEnabled && change.timelineChanged) {
+        this.showLoading()
+        this.schedulePatchedLayout(() => this.refreshTimeRangeLayout())
+      } else {
+        this.refreshTimeRangeLayout()
+      }
+      return
+    }
+
+    if (this.canPatchRecordsOnly(change, previousHeaderHeight)) {
+      if (this.isLoadingEnabled) {
+        this.showLoading()
+        this.schedulePatchedLayout(() => this.refreshRecordsLayout())
+      } else {
+        this.refreshRecordsLayout()
+      }
+      return
+    }
+
+    if (this.canPatchBodyOnly(change)) {
+      this.refreshBodyLayout()
+      return
+    }
+
     this.activeVirtualRowWindow = null
     if (this.isLoadingEnabled) {
       this.showLoading()
@@ -57,6 +125,146 @@ export default class VanillaGantt {
     } else {
       this.render()
     }
+  }
+
+  classifyOptionPatch(options = {}) {
+    const keys = Object.keys(options || {})
+    const hasOnly = allowed => keys.length > 0 && keys.every(key => allowed.includes(key))
+    const tablePatch = options.taskListTable || {}
+    const tableKeys = Object.keys(tablePatch)
+    const tableLayoutKeys = ['tableWidth', 'minTableWidth', 'maxTableWidth', 'columnResizable']
+    const timelineKeys = ['minDate', 'maxDate', 'timelineHeader']
+    return {
+      keys,
+      recordsChanged: Object.prototype.hasOwnProperty.call(options, 'records'),
+      timelineChanged: keys.some(key => timelineKeys.includes(key)),
+      tableChanged: Object.prototype.hasOwnProperty.call(options, 'taskListTable'),
+      tableLayoutOnly: keys.length === 1 &&
+        Object.prototype.hasOwnProperty.call(options, 'taskListTable') &&
+        tableKeys.length > 0 &&
+        tableKeys.every(key => tableLayoutKeys.includes(key)),
+      scrollbarChanged: Object.prototype.hasOwnProperty.call(options, 'scrollbar'),
+      interactionChanged: keys.some(key => ['onScroll', 'performance', 'loading'].includes(key)),
+      dependencyChanged: Object.prototype.hasOwnProperty.call(options, 'dependency'),
+      gridChanged: Object.prototype.hasOwnProperty.call(options, 'grid'),
+      markLineChanged: Object.prototype.hasOwnProperty.call(options, 'markLine'),
+      taskBarChanged: Object.prototype.hasOwnProperty.call(options, 'taskBar'),
+      virtualScrollChanged: Object.prototype.hasOwnProperty.call(options, 'virtualScroll'),
+      onlyInteraction: hasOnly(['onScroll', 'performance', 'loading']),
+      onlyRecords: hasOnly(['records']),
+      onlyBody: hasOnly(['dependency', 'grid', 'markLine', 'taskBar', 'performance'])
+    }
+  }
+
+  canPatchScrollbarOnly(options, previousAlwaysVisible) {
+    const keys = Object.keys(options || {})
+    if (keys.length !== 1 || !Object.prototype.hasOwnProperty.call(options, 'scrollbar')) return false
+    const nextAlwaysVisible = (this.options.scrollbar || {}).alwaysVisible
+    return previousAlwaysVisible === nextAlwaysVisible && this.scrollEl && this.scrollWrap
+  }
+
+  canPatchInteractionOnly(change) {
+    return change.onlyInteraction && this.rootEl
+  }
+
+  patchInteractionOptions() {
+    if (!this.isLoadingEnabled) this.hideLoading()
+  }
+
+  canPatchTableLayoutOnly(change) {
+    return change.tableLayoutOnly && this.rootEl && this.leftHeaderEl && this.leftBodyInner
+  }
+
+  canPatchTimeRangeOnly(change, previousHeaderHeight) {
+    if (!change.keys.length) return false
+    return change.keys.every(key => ['minDate', 'maxDate', 'markLine', 'timelineHeader'].includes(key)) &&
+      previousHeaderHeight === this.headerHeight &&
+      this.timelineStage &&
+      this.timelineSvg &&
+      this.bodyStage &&
+      this.bodySvg
+  }
+
+  canPatchRecordsOnly(change, previousHeaderHeight) {
+    return change.onlyRecords &&
+      this.options.minDate &&
+      this.options.maxDate &&
+      previousHeaderHeight === this.headerHeight &&
+      this.rootEl &&
+      this.leftBodyInner &&
+      this.bodyStage &&
+      this.bodySvg
+  }
+
+  canPatchBodyOnly(change) {
+    return change.onlyBody &&
+      !change.taskBarChanged &&
+      this.bodyStage &&
+      this.bodySvg
+  }
+
+  syncScrollbarLayout() {
+    const width = `${this.scrollbarWidth}px`
+    const height = `${this.scrollbarHeight}px`
+    ;[this.scrollWrap, this.scrollEl].forEach(node => {
+      if (!node || !node.style) return
+      node.style.setProperty('--vg-scrollbar-width', width)
+      node.style.setProperty('--vg-scrollbar-height', height)
+    })
+    if (this.customScrollbarUpdater) this.customScrollbarUpdater(true)
+  }
+
+  refreshBodyLayout() {
+    this.renderBodySvgContent()
+    if (this.customScrollbarUpdater) this.customScrollbarUpdater(true)
+  }
+
+  refreshRecordsLayout() {
+    this.activeVirtualRowWindow = this.virtualRowWindow
+    if (this.bodyStage) {
+      this.bodyStage.style.height = `${this.bodyHeight}px`
+    }
+    if (this.leftBodyInner) {
+      this.leftBodyInner.style.height = `${this.bodyHeight}px`
+    }
+    if (this.scrollEl) {
+      const maxTop = Math.max(0, this.bodyHeight - this.scrollEl.clientHeight)
+      if (this.scrollTop > maxTop) {
+        this.scrollTop = maxTop
+        this.scrollEl.scrollTop = maxTop
+      }
+    }
+    this.renderLeftBodyContent()
+    this.renderBodySvgContent()
+    if (this.customScrollbarUpdater) this.customScrollbarUpdater(true)
+  }
+
+  refreshTimeRangeLayout() {
+    this.activeVirtualWindow = this.virtualWindow
+    if (this.timelineViewport && this.timelineHeader.backgroundColor) {
+      this.timelineViewport.style.background = this.timelineHeader.backgroundColor
+    }
+    if (this.timelineStage) {
+      this.timelineStage.style.width = `${this.chartWidth}px`
+      this.timelineStage.style.transform = `translate3d(-${this.scrollLeft}px, 0, 0)`
+    }
+    if (this.timelineSvg && this.timelineHeader.backgroundColor) {
+      this.timelineSvg.style.background = this.timelineHeader.backgroundColor
+    }
+    if (this.bodyStage) {
+      this.bodyStage.style.width = `${this.chartWidth}px`
+      this.bodyStage.style.minWidth = `${this.chartWidth}px`
+    }
+    if (this.scrollEl) {
+      const maxLeft = Math.max(0, this.chartWidth - this.scrollEl.clientWidth)
+      if (this.scrollLeft > maxLeft) {
+        this.scrollLeft = maxLeft
+        this.scrollEl.scrollLeft = maxLeft
+      }
+    }
+    this.renderTimelineSvgContent()
+    this.renderBodySvgContent()
+    if (this.customScrollbarUpdater) this.customScrollbarUpdater(true)
   }
 
   destroy() {
@@ -70,6 +278,7 @@ export default class VanillaGantt {
       cancelAnimationFrame(this.virtualRenderFrame)
       this.virtualRenderFrame = null
     }
+    this.cancelBodyRenderSlice()
     if (this.optionsRenderFrame) {
       cancelAnimationFrame(this.optionsRenderFrame)
       this.optionsRenderFrame = null
@@ -79,6 +288,14 @@ export default class VanillaGantt {
       this.hideLoadingFrame = null
     }
     this.pendingVirtualRender = { x: false, y: false }
+    this.pendingScrollbarDragRender = { x: false, y: false }
+    if (this.scrollbarDragRenderTimer) {
+      clearTimeout(this.scrollbarDragRenderTimer)
+      this.scrollbarDragRenderTimer = null
+    }
+    this.scrollbarDragRenderStartedAt = 0
+    this.customScrollbarDragActive = false
+    this.customScrollbarUpdater = null
     this.cleanupVirtualContent()
     this.cleanupLeftVirtualContent()
     this.disposers.forEach(dispose => dispose())
@@ -86,10 +303,26 @@ export default class VanillaGantt {
   }
 
   cleanupVirtualContent() {
+    this.cancelBodyRenderSlice()
     this.taskMeasureFrames.forEach(frame => cancelAnimationFrame(frame))
     this.taskMeasureFrames = []
+    if (this.taskMeasureFrame) {
+      cancelAnimationFrame(this.taskMeasureFrame)
+      this.taskMeasureFrame = null
+    }
+    this.taskMeasureQueue = []
     this.virtualDisposers.forEach(dispose => dispose())
     this.virtualDisposers = []
+    this.currentRenderSnapshot = null
+  }
+
+  cancelBodyRenderSlice() {
+    this.bodyRenderToken += 1
+    this.pendingHideLoadingAfterBodyRender = false
+    if (this.bodyRenderFrame) {
+      cancelAnimationFrame(this.bodyRenderFrame)
+      this.bodyRenderFrame = null
+    }
   }
 
   cleanupLeftVirtualContent() {
@@ -97,7 +330,116 @@ export default class VanillaGantt {
     this.leftVirtualDisposers = []
   }
 
+  invalidateRowCache() {
+    this.rowCache = null
+  }
+
+  buildRowCache() {
+    const flatRows = []
+    const visibleRows = []
+    const rowById = {}
+    const visibleEntryById = {}
+    const tasksByRowId = {}
+    const descendantKeysByRowId = {}
+    const allTasks = []
+    const tasksField = this.taskBar.tasksField
+
+    const walkFlatRecord = (record, level = 0) => {
+      const recordKey = this.recordKey(record)
+      const normalized = { ...record, __recordKey: recordKey, level }
+      flatRows.push(normalized)
+      rowById[recordKey] = normalized
+
+      const rowTasks = Array.isArray(record[tasksField])
+        ? record[tasksField].map(task => ({
+          ...task,
+          __rowId: recordKey,
+          __rowRecord: normalized
+        }))
+        : []
+      tasksByRowId[recordKey] = rowTasks
+      rowTasks.forEach(task => allTasks.push(task))
+
+      const descendants = []
+      ;(record.children || []).forEach(child => {
+        const childKey = this.recordKey(child)
+        descendants.push(childKey)
+        const childDescendants = walkFlatRecord(child, level + 1)
+        childDescendants.forEach(key => descendants.push(key))
+      })
+      descendantKeysByRowId[recordKey] = descendants
+      return descendants
+    }
+
+    const walkFlat = (items, level = 0) => {
+      items.forEach(record => {
+        walkFlatRecord(record, level)
+      })
+    }
+
+    const walkVisible = (items, level = 0) => {
+      items.forEach(record => {
+        const normalized = { ...record, __recordKey: this.recordKey(record), level }
+        visibleRows.push(normalized)
+        if (record.children && this.isExpanded(normalized)) {
+          walkVisible(record.children, level + 1)
+        }
+      })
+    }
+
+    walkFlat(this.options.records)
+    walkVisible(this.options.records)
+
+    let top = 0
+    const visibleRowEntries = visibleRows.map(row => {
+      const height = this.rowHeight(row)
+      const entry = {
+        row,
+        top,
+        bottom: top + height,
+        height
+      }
+      top += height
+      visibleEntryById[this.recordKey(row)] = entry
+      return entry
+    })
+
+    return {
+      flatRows,
+      visibleRows,
+      visibleRowEntries,
+      visibleEntryById,
+      rowById,
+      tasksByRowId,
+      descendantKeysByRowId,
+      allTasks,
+      bodyHeight: top
+    }
+  }
+
+  renderedEntriesInWindow(window) {
+    return renderedEntriesInWindow(this, window)
+  }
+
+  buildRenderSnapshot() {
+    return buildRenderSnapshot(this)
+  }
+
+  buildDependencySnapshot() {
+    return buildDependencySnapshot(this)
+  }
+
+  createTaskLayoutByKey(renderTasks) {
+    return createTaskLayoutByKey(this, renderTasks)
+  }
+
+  getTaskLayout(task, snapshot = this.currentRenderSnapshot) {
+    return getTaskLayout(this, task, snapshot)
+  }
+
   render() {
+    this.invalidateRowCache()
+    this.timelineUnitsCache = null
     this.cleanup()
     this.activeVirtualWindow = this.virtualWindow
     this.activeVirtualRowWindow = this.virtualRowWindow
@@ -128,11 +470,39 @@ export default class VanillaGantt {
   scheduleOptionsRender() {
     if (this.optionsRenderFrame) return
     this.optionsRenderFrame = requestAnimationFrame(() => {
-      this.optionsRenderFrame = null
-      this.render()
-      this.hideLoadingFrame = requestAnimationFrame(() => {
-        this.hideLoadingFrame = null
-        this.hideLoading()
+      this.optionsRenderFrame = requestAnimationFrame(() => {
+        this.optionsRenderFrame = null
+        this.useSlicedBodyRender = this.loadingOptions.bodyRenderSlice !== false
+        this.render()
+        this.useSlicedBodyRender = false
+        if (this.bodyRenderFrame) {
+          this.pendingHideLoadingAfterBodyRender = true
+        } else {
+          this.hideLoadingFrame = requestAnimationFrame(() => {
+            this.hideLoadingFrame = null
+            this.hideLoading()
+          })
+        }
+      })
+    })
+  }
+
+  schedulePatchedLayout(callback) {
+    if (this.optionsRenderFrame) return
+    this.optionsRenderFrame = requestAnimationFrame(() => {
+      this.optionsRenderFrame = requestAnimationFrame(() => {
+        this.optionsRenderFrame = null
+        this.useSlicedBodyRender = this.loadingOptions.bodyRenderSlice !== false
+        callback()
+        this.useSlicedBodyRender = false
+        if (this.bodyRenderFrame) {
+          this.pendingHideLoadingAfterBodyRender = true
+        } else {
+          this.hideLoadingFrame = requestAnimationFrame(() => {
+            this.hideLoadingFrame = null
+            this.hideLoading()
+          })
+        }
       })
     })
   }
@@ -560,6 +930,7 @@ export default class VanillaGantt {
     if (this.timelineHeader.backgroundColor) {
       viewport.style.background = this.timelineHeader.backgroundColor
     }
+    this.timelineViewport = viewport
 
     const stage = el('div', 'vg-timeline-stage')
     stage.style.width = `${this.chartWidth}px`
@@ -618,16 +989,19 @@ export default class VanillaGantt {
       x: unit.x,
       y,
       width: unit.width,
-      height
-    })
-    const custom = this.resolveContent(scale.customLayout || this.timelineHeader.customLayout, {
-      dateInfo: unit,
-      unit,
-      scale,
-      scaleIndex,
-      major: scaleIndex === 0,
-      gantt: this
-    })
+        height
+      })
+    const shouldRenderContent = this.shouldRenderTimelineUnitContent(unit, scale)
+    const custom = shouldRenderContent
+      ? this.resolveContent(scale.customLayout || this.timelineHeader.customLayout, {
+        dateInfo: unit,
+        unit,
+        scale,
+        scaleIndex,
+        major: scaleIndex === 0,
+        gantt: this
+      })
+      : null
     const style = this.timelineCellStyle(scale)
     if (custom) {
       applyTimelineStyleToContent(custom, this.timelineCustomCellStyle(scale))
@@ -635,19 +1009,35 @@ export default class VanillaGantt {
     } else {
       const cell = el('div', `vg-timeline-cell${scaleIndex === 0 ? ' vg-timeline-cell--major' : ''}`)
       applyTimelineStyle(cell, style)
-      cell.textContent = unit.label
+      cell.textContent = shouldRenderContent ? unit.label : ''
       fo.append(cell)
     }
     return fo
   }
 
+  shouldRenderTimelineUnitContent(unit, scale) {
+    const minWidth = Number(
+      scale.minLabelWidth === undefined
+        ? this.timelineHeader.minLabelWidth
+        : scale.minLabelWidth
+    )
+    return !Number.isFinite(minWidth) || minWidth <= 0 || unit.width >= minWidth
+  }
+
   renderBody() {
-    const scroll = el('div', 'vg-scroll')
+    const wrap = el('div', `vg-scroll-wrap${this.scrollbarOptions.alwaysVisible ? ' vg-scroll-wrap--custom' : ''}`)
+    wrap.style.setProperty('--vg-scrollbar-width', `${this.scrollbarWidth}px`)
+    wrap.style.setProperty('--vg-scrollbar-height', `${this.scrollbarHeight}px`)
+    this.scrollWrap = wrap
+    const scroll = el('div', `vg-scroll${this.scrollbarOptions.alwaysVisible ? ' vg-scroll--custom' : ''}`)
+    scroll.style.setProperty('--vg-scrollbar-width', `${this.scrollbarWidth}px`)
+    scroll.style.setProperty('--vg-scrollbar-height', `${this.scrollbarHeight}px`)
     const stage = el('div', 'vg-stage')
     stage.style.width = `${this.chartWidth}px`
     stage.style.minWidth = `${this.chartWidth}px`
     stage.style.height = `${this.bodyHeight}px`
     stage.style.position = 'relative'
+    this.bodyStage = stage
 
     const svg = svgEl('svg', 'vg-svg')
     this.bodySvg = svg
@@ -666,33 +1056,289 @@ export default class VanillaGantt {
       const previousScrollTop = this.scrollTop
       this.scrollTop = scroll.scrollTop
       this.scrollLeft = scroll.scrollLeft
-      if (this.leftBodyInner) {
+      if (previousScrollTop !== this.scrollTop && this.leftBodyInner) {
         this.leftBodyInner.style.transform = `translate3d(0, -${this.scrollTop}px, 0)`
       }
-      if (this.timelineStage) {
+      if (previousScrollLeft !== this.scrollLeft && this.timelineStage) {
         this.timelineStage.style.transform = `translate3d(-${this.scrollLeft}px, 0, 0)`
       }
       if (typeof this.options.onScroll === 'function') {
         this.options.onScroll({ scrollLeft: this.scrollLeft, scrollTop: this.scrollTop })
       }
+      if (this.customScrollbarUpdater) this.customScrollbarUpdater()
       const refreshX = previousScrollLeft !== this.scrollLeft && this.shouldRefreshVirtualWindow()
       const refreshY = previousScrollTop !== this.scrollTop && this.shouldRefreshVirtualRows()
-      if (refreshX || refreshY) this.scheduleVirtualRender({ x: refreshX, y: refreshY })
+      if (refreshX || refreshY) {
+        const reason = { x: refreshX, y: refreshY }
+        if (this.customScrollbarDragActive) this.scheduleScrollbarDragVirtualRender(reason)
+        else this.scheduleVirtualRender(reason)
+      }
     }
     scroll.addEventListener('scroll', onScroll)
     this.disposers.push(() => scroll.removeEventListener('scroll', onScroll))
     this.scrollEl = scroll
+    wrap.append(scroll)
+    if (this.scrollbarOptions.alwaysVisible) {
+      this.renderCustomScrollbars(wrap, scroll)
+    }
 
-    return scroll
+    return wrap
+  }
+
+  renderCustomScrollbars(wrap, scroll) {
+    const vTrack = el('div', 'vg-scrollbar vg-scrollbar--vertical')
+    const hTrack = el('div', 'vg-scrollbar vg-scrollbar--horizontal')
+    const vThumb = el('div', 'vg-scrollbar-thumb')
+    const hThumb = el('div', 'vg-scrollbar-thumb')
+    const corner = el('div', 'vg-scrollbar-corner')
+    vTrack.append(vThumb)
+    hTrack.append(hThumb)
+    wrap.append(vTrack, hTrack, corner)
+
+    let updateFrame = null
+    let dragFrame = null
+    let isDragging = false
+    let pendingDragAxis = null
+    let pendingDragScroll = 0
+    let metrics = null
+    let cleanupActiveDrag = null
+    const measure = () => {
+      const verticalTrackSize = Math.max(1, wrap.clientHeight - this.scrollbarHeight)
+      const horizontalTrackSize = Math.max(1, wrap.clientWidth - this.scrollbarWidth)
+      const maxTop = Math.max(1, scroll.scrollHeight - scroll.clientHeight)
+      const maxLeft = Math.max(1, scroll.scrollWidth - scroll.clientWidth)
+      const measuredVerticalThumbSize = Math.max(28, Math.round((scroll.clientHeight / Math.max(scroll.scrollHeight, 1)) * verticalTrackSize))
+      const measuredHorizontalThumbSize = Math.max(28, Math.round((scroll.clientWidth / Math.max(scroll.scrollWidth, 1)) * horizontalTrackSize))
+      const verticalThumbSize = Math.min(verticalTrackSize, measuredVerticalThumbSize)
+      const horizontalThumbSize = Math.min(horizontalTrackSize, measuredHorizontalThumbSize)
+      metrics = {
+        verticalTrackSize,
+        horizontalTrackSize,
+        maxTop,
+        maxLeft,
+        verticalThumbSize,
+        horizontalThumbSize,
+        verticalTravel: Math.max(0, verticalTrackSize - verticalThumbSize),
+        horizontalTravel: Math.max(0, horizontalTrackSize - horizontalThumbSize)
+      }
+      vThumb.style.height = `${metrics.verticalThumbSize}px`
+      hThumb.style.width = `${metrics.horizontalThumbSize}px`
+      return metrics
+    }
+
+    const clamp = (value, min, max) => Math.min(max, Math.max(min, value))
+
+    const renderThumbs = () => {
+      const current = metrics || measure()
+      const top = (scroll.scrollTop / current.maxTop) * current.verticalTravel
+      const left = (scroll.scrollLeft / current.maxLeft) * current.horizontalTravel
+      vThumb.style.transform = `translate3d(0, ${top}px, 0)`
+      hThumb.style.transform = `translate3d(${left}px, 0, 0)`
+    }
+
+    const renderThumbAt = (axis, scrollValue) => {
+      const current = metrics || measure()
+      if (axis === 'y') {
+        const top = (scrollValue / current.maxTop) * current.verticalTravel
+        vThumb.style.transform = `translate3d(0, ${top}px, 0)`
+      } else {
+        const left = (scrollValue / current.maxLeft) * current.horizontalTravel
+        hThumb.style.transform = `translate3d(${left}px, 0, 0)`
+      }
+    }
+
+    const update = (forceMeasure = false) => {
+      if (forceMeasure) metrics = null
+      if (isDragging) return
+      if (updateFrame) return
+      updateFrame = requestAnimationFrame(() => {
+        updateFrame = null
+        renderThumbs()
+      })
+    }
+
+    const setScrollFromPointer = (axis, nextScroll) => {
+      const current = metrics || measure()
+      const maxScroll = axis === 'y' ? current.maxTop : current.maxLeft
+      const clampedScroll = clamp(nextScroll, 0, maxScroll)
+      pendingDragAxis = axis
+      pendingDragScroll = clampedScroll
+      if (dragFrame) return clampedScroll
+      dragFrame = requestAnimationFrame(() => {
+        dragFrame = null
+        renderThumbAt(pendingDragAxis, pendingDragScroll)
+        if (pendingDragAxis === 'y') scroll.scrollTop = pendingDragScroll
+        else scroll.scrollLeft = pendingDragScroll
+      })
+      return clampedScroll
+    }
+
+    const bindDrag = (thumb, axis) => {
+      const onPointerDown = event => {
+        if (event.button !== 0) return
+        const current = measure()
+        const startClient = axis === 'y' ? event.clientY : event.clientX
+        const startScroll = axis === 'y' ? scroll.scrollTop : scroll.scrollLeft
+        const travel = Math.max(1, axis === 'y' ? current.verticalTravel : current.horizontalTravel)
+        const maxScroll = axis === 'y' ? current.maxTop : current.maxLeft
+        let nextScroll = startScroll
+        const onMove = moveEvent => {
+          const currentClient = axis === 'y' ? moveEvent.clientY : moveEvent.clientX
+          nextScroll = setScrollFromPointer(axis, startScroll + ((currentClient - startClient) / travel) * maxScroll)
+          moveEvent.preventDefault()
+        }
+        const stopDrag = (applyPendingScroll, flushRender) => {
+          isDragging = false
+          this.customScrollbarDragActive = false
+          cleanupActiveDrag = null
+          wrap.classList.remove('vg-scroll-wrap--dragging')
+          if (dragFrame) {
+            cancelAnimationFrame(dragFrame)
+            dragFrame = null
+            if (applyPendingScroll) {
+              if (axis === 'y') scroll.scrollTop = nextScroll
+              else scroll.scrollLeft = nextScroll
+              renderThumbs()
+            }
+          }
+          if (flushRender) this.flushScrollbarDragVirtualRender()
+          document.removeEventListener('pointermove', onMove)
+          document.removeEventListener('pointerup', onUp)
+          document.removeEventListener('pointercancel', onUp)
+          if (thumb.releasePointerCapture && event.pointerId !== undefined) {
+            try {
+              thumb.releasePointerCapture(event.pointerId)
+            } catch (error) {
+              // Pointer capture may already be released by the browser.
+            }
+          }
+        }
+        const onUp = () => stopDrag(true, true)
+        isDragging = true
+        this.customScrollbarDragActive = true
+        if (updateFrame) {
+          cancelAnimationFrame(updateFrame)
+          updateFrame = null
+        }
+        cleanupActiveDrag = () => stopDrag(false, false)
+        wrap.classList.add('vg-scroll-wrap--dragging')
+        if (thumb.setPointerCapture && event.pointerId !== undefined) {
+          thumb.setPointerCapture(event.pointerId)
+        }
+        document.addEventListener('pointermove', onMove)
+        document.addEventListener('pointerup', onUp)
+        document.addEventListener('pointercancel', onUp)
+        event.preventDefault()
+      }
+      thumb.addEventListener('pointerdown', onPointerDown)
+      this.disposers.push(() => thumb.removeEventListener('pointerdown', onPointerDown))
+    }
+
+    const bindTrackJump = (track, thumb, axis) => {
+      const onPointerDown = event => {
+        if (event.button !== 0 || event.target === thumb) return
+        const current = measure()
+        const rect = track.getBoundingClientRect()
+        const pointerOffset = axis === 'y' ? event.clientY - rect.top : event.clientX - rect.left
+        const thumbSize = axis === 'y' ? current.verticalThumbSize : current.horizontalThumbSize
+        const travel = Math.max(1, axis === 'y' ? current.verticalTravel : current.horizontalTravel)
+        const maxScroll = axis === 'y' ? current.maxTop : current.maxLeft
+        const nextScroll = ((pointerOffset - thumbSize / 2) / travel) * maxScroll
+        if (axis === 'y') scroll.scrollTop = clamp(nextScroll, 0, maxScroll)
+        else scroll.scrollLeft = clamp(nextScroll, 0, maxScroll)
+        renderThumbs()
+        event.preventDefault()
+      }
+      track.addEventListener('pointerdown', onPointerDown)
+      this.disposers.push(() => track.removeEventListener('pointerdown', onPointerDown))
+    }
+
+    bindDrag(vThumb, 'y')
+    bindDrag(hThumb, 'x')
+    bindTrackJump(vTrack, vThumb, 'y')
+    bindTrackJump(hTrack, hThumb, 'x')
+    this.customScrollbarUpdater = update
+    this.disposers.push(() => {
+      if (cleanupActiveDrag) cleanupActiveDrag()
+      if (updateFrame) cancelAnimationFrame(updateFrame)
+      if (dragFrame) cancelAnimationFrame(dragFrame)
+    })
+    update(true)
   }
 
   renderBodySvgContent(svg = this.bodySvg) {
     if (!svg) return
+    const totalStart = this.now()
     this.cleanupVirtualContent()
     this.applyBodySvgViewport(svg)
+    const snapshotStart = this.now()
+    this.currentRenderSnapshot = this.buildRenderSnapshot()
+    const snapshotEnd = this.now()
+    const domStart = snapshotEnd
     svg.innerHTML = ''
     svg.append(this.renderDefs())
+    if (this.shouldSliceBodyRender()) {
+      this.appendGridSliced(svg, this.currentRenderSnapshot, {
+        totalStart,
+        snapshotStart,
+        snapshotEnd,
+        domStart
+      })
+      return
+    }
     this.appendGrid(svg)
+    this.bindDelegatedTaskInteractions(svg)
+    this.bindDelegatedLinkConnectorInteractions(svg)
+    const totalEnd = this.now()
+    this.emitBodyRenderPerformance(svg, this.currentRenderSnapshot, {
+      totalStart,
+      snapshotStart,
+      snapshotEnd,
+      domStart,
+      totalEnd,
+      sliced: false
+    })
+  }
+
+  shouldSliceBodyRender() {
+    return this.useSlicedBodyRender === true &&
+      this.loadingVisible &&
+      this.loadingOptions.bodyRenderSlice !== false
+  }
+
+  emitBodyRenderPerformance(svg, snapshot, metrics) {
+    if (!this.isPerformanceEnabled) return
+    const totalEnd = metrics.totalEnd === undefined ? this.now() : metrics.totalEnd
+    this.emitRenderPerformance({
+      type: 'body',
+      sliced: metrics.sliced === true,
+      duration: totalEnd - metrics.totalStart,
+      totalDuration: totalEnd - metrics.totalStart,
+      snapshotDuration: metrics.snapshotEnd - metrics.snapshotStart,
+      domDuration: totalEnd - metrics.domStart,
+      renderedRowCount: snapshot.renderedRowEntries.length,
+      visibleTaskCount: snapshot.visibleTasks.length,
+      renderTaskCount: snapshot.renderTasks.length,
+      visibleLinkCount: snapshot.visibleLinks.length,
+      visibleMilestoneCount: snapshot.visibleMilestones.length,
+      svgNodeCount: svg.querySelectorAll('*').length
+    })
+  }
+
+  now() {
+    return typeof performance !== 'undefined' && performance.now
+      ? performance.now()
+      : Date.now()
+  }
+
+  emitRenderPerformance(payload) {
+    const options = this.performanceOptions
+    if (typeof options.onRender === 'function') {
+      options.onRender(payload)
+    }
+    if (options.console && typeof console !== 'undefined' && console.info) {
+      console.info('[VanillaGantt performance]', payload)
+    }
   }
 
   applyBodySvgViewport(svg = this.bodySvg) {
@@ -714,15 +1360,11 @@ export default class VanillaGantt {
   }
 
   shouldRefreshVirtualWindow() {
-    if (!this.isVirtualScrollEnabled || !this.activeVirtualWindow) return false
-    const threshold = Math.max(240, this.virtualBufferPx * 0.5)
-    return Math.abs(this.scrollLeft - this.activeVirtualWindow.renderedForLeft) > threshold
+    return shouldRefreshVirtualWindow(this)
   }
 
   shouldRefreshVirtualRows() {
-    if (!this.isVerticalVirtualScrollEnabled || !this.activeVirtualRowWindow) return false
-    const threshold = Math.max(240, this.virtualRowBufferPx * 0.75)
-    return Math.abs(this.scrollTop - this.activeVirtualRowWindow.renderedForTop) > threshold
+    return shouldRefreshVirtualRows(this)
   }
 
   scheduleVirtualRender(reason = { x: true, y: true }) {
@@ -743,7 +1385,41 @@ export default class VanillaGantt {
         this.renderLeftBodyContent()
       }
       this.renderBodySvgContent()
+      if (this.customScrollbarUpdater) this.customScrollbarUpdater()
     })
+  }
+
+  scheduleScrollbarDragVirtualRender(reason = { x: true, y: true }) {
+    this.pendingScrollbarDragRender.x = this.pendingScrollbarDragRender.x || reason.x !== false
+    this.pendingScrollbarDragRender.y = this.pendingScrollbarDragRender.y || reason.y !== false
+    const now = performance.now()
+    if (!this.scrollbarDragRenderStartedAt) {
+      this.scrollbarDragRenderStartedAt = now
+    }
+    if (this.scrollbarDragRenderTimer) {
+      clearTimeout(this.scrollbarDragRenderTimer)
+      this.scrollbarDragRenderTimer = null
+    }
+    const elapsed = now - this.scrollbarDragRenderStartedAt
+    const delay = elapsed >= this.scrollbarDragRenderMaxWait ? 0 : this.scrollbarDragRenderDelay
+    this.scrollbarDragRenderTimer = setTimeout(() => {
+      this.scrollbarDragRenderTimer = null
+      this.scrollbarDragRenderStartedAt = 0
+      const pending = this.pendingScrollbarDragRender
+      this.pendingScrollbarDragRender = { x: false, y: false }
+      if (pending.x || pending.y) this.scheduleVirtualRender(pending)
+    }, delay)
+  }
+
+  flushScrollbarDragVirtualRender() {
+    if (this.scrollbarDragRenderTimer) {
+      clearTimeout(this.scrollbarDragRenderTimer)
+      this.scrollbarDragRenderTimer = null
+    }
+    this.scrollbarDragRenderStartedAt = 0
+    const pending = this.pendingScrollbarDragRender
+    this.pendingScrollbarDragRender = { x: false, y: false }
+    if (pending.x || pending.y) this.scheduleVirtualRender(pending)
   }
 
   renderDefs() {
@@ -767,6 +1443,7 @@ export default class VanillaGantt {
   }
 
   appendGrid(svg) {
+    const snapshot = this.currentRenderSnapshot || this.buildRenderSnapshot()
     const xWindow = this.activeVirtualWindow || this.virtualWindow
     const yWindow = this.activeVirtualRowWindow || this.virtualRowWindow
     const viewportWidth = Math.max(1, xWindow.xEnd - xWindow.xStart)
@@ -776,11 +1453,11 @@ export default class VanillaGantt {
       svg.append(this.rect(xWindow.xStart, yWindow.yStart, viewportWidth, viewportHeight, this.grid.backgroundColor))
     }
 
-    this.backgroundShades.forEach(shade => {
+    snapshot.backgroundShades.forEach(shade => {
       svg.append(this.rect(shade.x, yWindow.yStart, shade.width, viewportHeight, shade.fill))
     })
 
-    this.visibleBackgroundRanges.forEach(range => {
+    snapshot.visibleBackgroundRanges.forEach(range => {
       const rect = this.rect(
         this.timeToX(range.startDate),
         yWindow.yStart,
@@ -792,25 +1469,25 @@ export default class VanillaGantt {
       svg.append(rect)
     })
 
-    this.verticalLines.forEach((item, index) => {
+    snapshot.verticalLines.forEach((item, index) => {
       const style = this.resolveStyle(this.grid.verticalLine, { index, dateIndex: index, date: item.startDate, ganttInstance: this })
       const line = this.line(item.x, yWindow.yStart, item.x, yWindow.yEnd, style.lineColor || '#e8eeee')
       this.applyLineStyle(line, style)
       svg.append(line)
     })
 
-    this.rowLines.forEach((item, index) => {
+    snapshot.rowLines.forEach((item, index) => {
       const style = this.resolveStyle(this.grid.horizontalLine, { index, ganttInstance: this })
       const line = this.line(xWindow.xStart, item.y, xWindow.xEnd, item.y, style.lineColor || '#edf1f2')
       this.applyLineStyle(line, style)
       svg.append(line)
     })
 
-    this.markLines.forEach(markLine => {
+    snapshot.markLines.forEach(markLine => {
       this.appendMarkLine(svg, markLine)
     })
 
-    this.visibleRowBackgroundRanges.forEach(range => {
+    snapshot.visibleRowBackgroundRanges.forEach(range => {
       const rect = this.rect(
         this.timeToX(range.startDate),
         this.rowTop(range.recordKey) + (range.offsetY || 0),
@@ -822,30 +1499,161 @@ export default class VanillaGantt {
       svg.append(rect)
     })
 
-    this.stripedTasks.forEach(task => {
+    snapshot.stripedTasks.forEach(task => {
+      const layout = this.getTaskLayout(task, snapshot)
       const rect = this.rect(
-        this.timeToX(this.taskStart(task)),
-        this.taskY(task),
-        this.durationWidth(this.taskStart(task), this.taskEnd(task)),
-        this.taskRenderHeight(task),
+        layout.x,
+        layout.y,
+        layout.width,
+        layout.height,
         'url(#vg-diagonal-stripe)'
       )
       svg.append(rect)
     })
 
-    this.renderTasks.forEach(task => {
+    snapshot.renderTasks.forEach(task => {
       svg.append(this.renderTask(task))
     })
 
-    this.visibleMilestones.forEach(item => {
+    snapshot.visibleMilestones.forEach(item => {
       svg.append(this.renderMilestone(item))
     })
 
-    this.visibleLinks.forEach(link => {
-      this.appendLink(svg, link)
+    snapshot.visibleLinks.forEach(link => {
+      this.appendLink(svg, link, snapshot)
     })
 
-    this.appendLinkConnectors(svg)
+    this.appendLinkConnectors(svg, snapshot)
+  }
+
+  appendGridSliced(svg, snapshot, metrics) {
+    const token = this.bodyRenderToken
+    const xWindow = snapshot.xWindow
+    const yWindow = snapshot.yWindow
+    const viewportWidth = Math.max(1, xWindow.xEnd - xWindow.xStart)
+    const viewportHeight = Math.max(1, yWindow.yEnd - yWindow.yStart)
+    const runners = []
+
+    const addRunner = (items, appendItem) => {
+      let index = 0
+      runners.push(deadline => {
+        while (index < items.length) {
+          appendItem(items[index], index)
+          index += 1
+          if (this.now() >= deadline) return false
+        }
+        return true
+      })
+    }
+
+    if (this.grid.backgroundColor) {
+      runners.push(() => {
+        svg.append(this.rect(xWindow.xStart, yWindow.yStart, viewportWidth, viewportHeight, this.grid.backgroundColor))
+        return true
+      })
+    }
+
+    addRunner(snapshot.backgroundShades, shade => {
+      svg.append(this.rect(shade.x, yWindow.yStart, shade.width, viewportHeight, shade.fill))
+    })
+
+    addRunner(snapshot.visibleBackgroundRanges, range => {
+      const rect = this.rect(
+        this.timeToX(range.startDate),
+        yWindow.yStart,
+        this.durationWidth(range.startDate, range.endDate),
+        viewportHeight,
+        range.color || range.fill || '#edf1f1'
+      )
+      rect.setAttribute('opacity', range.opacity === undefined ? 1 : range.opacity)
+      svg.append(rect)
+    })
+
+    addRunner(snapshot.verticalLines, (item, index) => {
+      const style = this.resolveStyle(this.grid.verticalLine, { index, dateIndex: index, date: item.startDate, ganttInstance: this })
+      const line = this.line(item.x, yWindow.yStart, item.x, yWindow.yEnd, style.lineColor || '#e8eeee')
+      this.applyLineStyle(line, style)
+      svg.append(line)
+    })
+
+    addRunner(snapshot.rowLines, (item, index) => {
+      const style = this.resolveStyle(this.grid.horizontalLine, { index, ganttInstance: this })
+      const line = this.line(xWindow.xStart, item.y, xWindow.xEnd, item.y, style.lineColor || '#edf1f2')
+      this.applyLineStyle(line, style)
+      svg.append(line)
+    })
+
+    addRunner(snapshot.markLines, markLine => {
+      this.appendMarkLine(svg, markLine)
+    })
+
+    addRunner(snapshot.visibleRowBackgroundRanges, range => {
+      const rect = this.rect(
+        this.timeToX(range.startDate),
+        this.rowTop(range.recordKey) + (range.offsetY || 0),
+        this.durationWidth(range.startDate, range.endDate),
+        range.height || this.rowHeight(this.rowById[range.recordKey] || {}),
+        range.color || range.fill || '#dcf8c9'
+      )
+      rect.setAttribute('opacity', range.opacity === undefined ? 1 : range.opacity)
+      svg.append(rect)
+    })
+
+    addRunner(snapshot.stripedTasks, task => {
+      const layout = this.getTaskLayout(task, snapshot)
+      svg.append(this.rect(layout.x, layout.y, layout.width, layout.height, 'url(#vg-diagonal-stripe)'))
+    })
+
+    addRunner(snapshot.renderTasks, task => {
+      svg.append(this.renderTask(task))
+    })
+
+    addRunner(snapshot.visibleMilestones, item => {
+      svg.append(this.renderMilestone(item))
+    })
+
+    addRunner(snapshot.visibleLinks, link => {
+      this.appendLink(svg, link, snapshot)
+    })
+
+    runners.push(() => {
+      this.appendLinkConnectors(svg, snapshot)
+      return true
+    })
+
+    let runnerIndex = 0
+    const run = () => {
+      if (token !== this.bodyRenderToken) return
+      const deadline = this.now() + this.bodyRenderSliceBudget
+      while (runnerIndex < runners.length) {
+        const done = runners[runnerIndex](deadline)
+        if (!done || this.now() >= deadline) break
+        runnerIndex += 1
+      }
+      if (runnerIndex < runners.length) {
+        this.bodyRenderFrame = requestAnimationFrame(run)
+        return
+      }
+
+      this.bodyRenderFrame = null
+      this.bindDelegatedTaskInteractions(svg)
+      this.bindDelegatedLinkConnectorInteractions(svg)
+      this.emitBodyRenderPerformance(svg, snapshot, {
+        ...metrics,
+        totalEnd: this.now(),
+        sliced: true
+      })
+      if (this.pendingHideLoadingAfterBodyRender) {
+        this.pendingHideLoadingAfterBodyRender = false
+        this.hideLoadingFrame = requestAnimationFrame(() => {
+          this.hideLoadingFrame = null
+          this.hideLoading()
+        })
+      }
+      if (this.customScrollbarUpdater) this.customScrollbarUpdater()
+    }
+
+    this.bodyRenderFrame = requestAnimationFrame(run)
   }
 
   appendMarkLine(svg, markLine) {
@@ -870,9 +1678,10 @@ export default class VanillaGantt {
     svg.append(text)
   }
 
-  appendLink(svg, link) {
-    const from = this.taskLayoutByKey[link.from]
-    const to = this.taskLayoutByKey[link.to]
+  appendLink(svg, link, snapshot = this.currentRenderSnapshot) {
+    const layoutByKey = snapshot ? snapshot.taskLayoutByKey : this.taskLayoutByKey
+    const from = layoutByKey[link.from]
+    const to = layoutByKey[link.to]
     if (!from || !to) return
 
     const lineMode = this.linkLineMode(link)
@@ -975,7 +1784,7 @@ export default class VanillaGantt {
   }
 
   isDuplicateLink(fromKey, toKey) {
-    return this.normalizedLinks.some(link => this.isSameKey(link.from, fromKey) && this.isSameKey(link.to, toKey))
+    return this.linkKeySet.has(`${String(fromKey)}->${String(toKey)}`)
   }
 
   canCreateLink(fromTask, toTask) {
@@ -1003,11 +1812,13 @@ export default class VanillaGantt {
     return true
   }
 
-  appendLinkConnectors(svg) {
+  appendLinkConnectors(svg, snapshot = this.currentRenderSnapshot) {
     if (!this.dependency.linkCreatable) return
-    this.renderTasks.forEach(task => {
+    const renderTasks = snapshot ? snapshot.renderTasks : this.renderTasks
+    const layoutByKey = snapshot ? snapshot.taskLayoutByKey : this.taskLayoutByKey
+    renderTasks.forEach(task => {
       const key = this.taskKey(task)
-      const layout = this.taskLayoutByKey[key]
+      const layout = layoutByKey[key]
       if (key === undefined || key === null || !layout) return
       ;['start', 'finish'].forEach(side => {
         if (!this.isConnectorAllowed(task, side)) return
@@ -1048,7 +1859,6 @@ export default class VanillaGantt {
         stroke: side === 'start' ? '#40c51b' : '#168dff',
         'stroke-width': 2
       })
-      this.bindLinkConnector(circle, task, side)
       return circle
     }
 
@@ -1068,8 +1878,25 @@ export default class VanillaGantt {
     })
     content.append(custom)
     fo.append(content)
-    this.bindLinkConnector(fo, task, side)
     return fo
+  }
+
+  bindDelegatedLinkConnectorInteractions(svg) {
+    const onPointerDown = event => {
+      const target = event.target && event.target.closest
+        ? event.target.closest('.vg-link-connector--finish[data-task-key]')
+        : null
+      if (!target || !svg.contains(target)) return
+      const taskKey = target.getAttribute('data-task-key')
+      const layout = this.currentRenderSnapshot && this.currentRenderSnapshot.taskLayoutByKey
+        ? this.currentRenderSnapshot.taskLayoutByKey[taskKey]
+        : null
+      const task = layout ? layout.task : this.renderTasks.find(item => String(this.taskKey(item)) === String(taskKey))
+      if (!task) return
+      this.startLinkCreate(task, 'finish', event)
+    }
+    svg.addEventListener('pointerdown', onPointerDown)
+    this.virtualDisposers.push(() => svg.removeEventListener('pointerdown', onPointerDown))
   }
 
   bindLinkConnector(node, task, side) {
@@ -1266,12 +2093,13 @@ export default class VanillaGantt {
   }
 
   renderTask(task) {
-    const width = this.durationWidth(this.taskStart(task), this.taskEnd(task))
-    const height = this.taskRenderHeight(task)
+    const layout = this.getTaskLayout(task)
+    const width = layout.width
+    const height = layout.height
     const fo = svgEl('foreignObject', 'vg-task-fo')
     attrs(fo, {
-      x: this.timeToX(this.taskStart(task)),
-      y: this.taskY(task),
+      x: layout.x,
+      y: layout.y,
       width,
       height,
       'data-task-key': this.taskKey(task)
@@ -1282,12 +2110,14 @@ export default class VanillaGantt {
       row,
       width,
       height,
-      x: this.timeToX(this.taskStart(task)),
-      y: this.taskY(task)
+      x: layout.x,
+      y: layout.y
     })
     const custom = this.resolveContent(this.taskBar.customLayout, payload)
     fo.append(custom || this.renderDefaultTask(task))
-    this.scheduleTaskForeignObjectMeasure(fo, height)
+    if (custom && task.height === undefined) {
+      this.scheduleTaskForeignObjectMeasure(fo, height, task)
+    }
     if (this.isTaskDimmed(task)) {
       const opacity = String(this.dependency.dimOpacity === undefined ? 0.18 : this.dependency.dimOpacity)
       fo.classList.add('vg-task-fo--dimmed')
@@ -1296,23 +2126,132 @@ export default class VanillaGantt {
         if (child && child.style) child.style.opacity = opacity
       })
     }
-    this.bindTaskInteractions(fo, task)
+    if (this.isTaskDraggable(task)) {
+      fo.classList.add('vg-task-fo--draggable')
+    }
     return fo
   }
 
-  scheduleTaskForeignObjectMeasure(fo, fallbackHeight) {
-    const frame = requestAnimationFrame(() => {
-      this.taskMeasureFrames = this.taskMeasureFrames.filter(item => item !== frame)
-      const content = fo.firstElementChild
-      if (!(content instanceof HTMLElement)) return
+  bindDelegatedTaskInteractions(svg) {
+    const taskNodeFromEvent = event => {
+      const target = event.target && event.target.closest
+        ? event.target.closest('.vg-task-fo[data-task-key]')
+        : null
+      return target && svg.contains(target) ? target : null
+    }
+    const taskFromNode = node => {
+      if (!node) return null
+      const key = node.getAttribute('data-task-key')
+      if (key === undefined || key === null) return null
+      const layout = this.currentRenderSnapshot && this.currentRenderSnapshot.taskLayoutByKey
+        ? this.currentRenderSnapshot.taskLayoutByKey[key]
+        : null
+      return layout ? layout.task : this.renderTasks.find(item => String(this.taskKey(item)) === String(key))
+    }
 
-      const rectHeight = content.getBoundingClientRect().height
-      const measuredHeight = Math.ceil(Math.max(content.scrollHeight, content.offsetHeight, rectHeight))
-      if (measuredHeight > fallbackHeight) {
-        fo.setAttribute('height', String(measuredHeight))
+    const onClick = event => {
+      const node = taskNodeFromEvent(event)
+      if (!node || event.__vgTaskClickHandled) return
+      event.__vgTaskClickHandled = true
+      const task = taskFromNode(node)
+      if (!task) return
+      const taskKey = this.taskKey(task)
+      if (this.suppressClickTaskKey === taskKey && Date.now() < this.suppressClickUntil) {
+        event.preventDefault()
+        event.stopImmediatePropagation()
+        return
       }
+      const shouldRender = this.activateTaskLinkGroup(task)
+      this.callTaskCallback('onClick', task, event)
+      event.stopImmediatePropagation()
+      if (shouldRender) this.render()
+    }
+    const onContextMenu = event => {
+      const node = taskNodeFromEvent(event)
+      if (!node || event.__vgTaskContextMenuHandled) return
+      event.__vgTaskContextMenuHandled = true
+      const task = taskFromNode(node)
+      if (!task || typeof this.taskBar.onContextMenu !== 'function') return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      this.callTaskCallback('onContextMenu', task, event)
+    }
+    const onPointerDown = event => {
+      const node = taskNodeFromEvent(event)
+      if (!node || event.__vgTaskPointerDownHandled) return
+      event.__vgTaskPointerDownHandled = true
+      const task = taskFromNode(node)
+      if (!task) return
+      this.startTaskDrag(node, task, event)
+    }
+    const onMouseOver = event => {
+      const node = taskNodeFromEvent(event)
+      if (!node) return
+      if (event.relatedTarget && node.contains(event.relatedTarget)) return
+      const task = taskFromNode(node)
+      if (!task) return
+      this.hoveredTaskKey = this.taskKey(task)
+      this.callTaskCallback('onMouseEnter', task, event)
+      this.showTaskTooltip(task, event)
+    }
+    const onMouseMove = event => {
+      if (!taskNodeFromEvent(event)) return
+      this.positionTaskTooltip(event)
+    }
+    const onMouseOut = event => {
+      const node = taskNodeFromEvent(event)
+      if (!node) return
+      if (event.relatedTarget && node.contains(event.relatedTarget)) return
+      const task = taskFromNode(node)
+      if (task) this.callTaskCallback('onMouseLeave', task, event)
+      this.hoveredTaskKey = null
+      this.hideTaskTooltip()
+    }
+
+    svg.addEventListener('click', onClick)
+    svg.addEventListener('contextmenu', onContextMenu)
+    svg.addEventListener('pointerdown', onPointerDown)
+    svg.addEventListener('mouseover', onMouseOver)
+    svg.addEventListener('mousemove', onMouseMove)
+    svg.addEventListener('mouseout', onMouseOut)
+    this.virtualDisposers.push(() => {
+      svg.removeEventListener('click', onClick)
+      svg.removeEventListener('contextmenu', onContextMenu)
+      svg.removeEventListener('pointerdown', onPointerDown)
+      svg.removeEventListener('mouseover', onMouseOver)
+      svg.removeEventListener('mousemove', onMouseMove)
+      svg.removeEventListener('mouseout', onMouseOut)
     })
-    this.taskMeasureFrames.push(frame)
+  }
+
+  scheduleTaskForeignObjectMeasure(fo, fallbackHeight, task = null) {
+    const key = task ? this.taskKey(task) : null
+    const cachedHeight = key !== undefined && key !== null ? this.taskMeasuredHeightByKey[key] : null
+    if (cachedHeight && cachedHeight > fallbackHeight) {
+      fo.setAttribute('height', String(cachedHeight))
+      return
+    }
+
+    this.taskMeasureQueue.push({ fo, fallbackHeight, key })
+    if (this.taskMeasureFrame) return
+    this.taskMeasureFrame = requestAnimationFrame(() => {
+      this.taskMeasureFrame = null
+      const queue = this.taskMeasureQueue
+      this.taskMeasureQueue = []
+      queue.forEach(item => {
+        const content = item.fo.firstElementChild
+        if (!(content instanceof HTMLElement)) return
+
+        const rectHeight = content.getBoundingClientRect().height
+        const measuredHeight = Math.ceil(Math.max(content.scrollHeight, content.offsetHeight, rectHeight))
+        if (item.key !== undefined && item.key !== null) {
+          this.taskMeasuredHeightByKey[item.key] = measuredHeight
+        }
+        if (measuredHeight > item.fallbackHeight) {
+          item.fo.setAttribute('height', String(measuredHeight))
+        }
+      })
+    })
   }
 
   renderMilestone(item) {
@@ -1871,6 +2810,7 @@ export default class VanillaGantt {
     if (!row.children) return
     const key = this.recordKey(row)
     this.expandedRows[key] = !this.isExpanded(row)
+    this.invalidateRowCache()
     this.render()
   }
 
@@ -1919,9 +2859,12 @@ export default class VanillaGantt {
 
   taskStyle(task) {
     const style = task.parentAggregate ? this.taskBar.projectStyle : this.taskBar.barStyle
+    const index = task.__renderIndex === undefined
+      ? this.renderTasks.findIndex(item => this.taskKey(item) === this.taskKey(task))
+      : task.__renderIndex
     return this.resolveStyle(style, {
       taskRecord: task,
-      index: this.renderTasks.findIndex(item => this.taskKey(item) === this.taskKey(task)),
+      index,
       startDate: new Date(toTime(this.taskStart(task))),
       endDate: new Date(toTime(this.taskEnd(task))),
       ganttInstance: this
@@ -1983,12 +2926,8 @@ export default class VanillaGantt {
   }
 
   rowTop(recordKey) {
-    let top = 0
-    for (const row of this.visibleRows) {
-      if (this.recordKey(row) === recordKey) return top
-      top += this.rowHeight(row)
-    }
-    return 0
+    const entry = this.rowMetrics.visibleEntryById[recordKey]
+    return entry ? entry.top : 0
   }
 
   taskY(task) {
@@ -2195,6 +3134,11 @@ export default class VanillaGantt {
     return toTime(end) > this.virtualWindow.timeStart && toTime(start) < this.virtualWindow.timeEnd
   }
 
+  overlapsWindowRange(start, end, window = this.activeVirtualWindow || this.virtualWindow) {
+    if (!this.isVirtualScrollEnabled) return this.overlapsRange(start, end)
+    return toTime(end) > window.timeStart && toTime(start) < window.timeEnd
+  }
+
   isPrimaryTask(task) {
     if (task.logistics) return false
     const lane = this.taskLane(task)
@@ -2222,6 +3166,13 @@ export default class VanillaGantt {
 
   get taskListTable() {
     return this.options.taskListTable || {}
+  }
+
+  get rowMetrics() {
+    if (!this.rowCache) {
+      this.rowCache = this.buildRowCache()
+    }
+    return this.rowCache
   }
 
   get timelineHeader() {
@@ -2270,6 +3221,43 @@ export default class VanillaGantt {
 
   get isLoadingEnabled() {
     return this.loadingOptions.enabled === true
+  }
+
+  get bodyRenderSliceBudget() {
+    const budget = Number(this.loadingOptions.bodyRenderSliceBudget)
+    return Number.isFinite(budget) && budget > 0 ? budget : 8
+  }
+
+  get performanceOptions() {
+    return this.options.performance || {}
+  }
+
+  get isPerformanceEnabled() {
+    return this.performanceOptions.enabled === true
+  }
+
+  get scrollbarOptions() {
+    return this.options.scrollbar || {}
+  }
+
+  get scrollbarWidth() {
+    const width = Number(this.scrollbarOptions.width)
+    return Number.isFinite(width) && width >= 0 ? width : 10
+  }
+
+  get scrollbarHeight() {
+    const height = Number(this.scrollbarOptions.height)
+    return Number.isFinite(height) && height >= 0 ? height : this.scrollbarWidth
+  }
+
+  get scrollbarDragRenderDelay() {
+    const delay = Number(this.scrollbarOptions.dragRenderDelay)
+    return Number.isFinite(delay) && delay >= 0 ? delay : 80
+  }
+
+  get scrollbarDragRenderMaxWait() {
+    const wait = Number(this.scrollbarOptions.dragRenderMaxWait)
+    return Number.isFinite(wait) && wait >= 0 ? wait : 260
   }
 
   get tableWidth() {
@@ -2327,7 +3315,7 @@ export default class VanillaGantt {
   }
 
   get bodyHeight() {
-    return this.visibleRows.reduce((height, row) => height + this.rowHeight(row), 0)
+    return this.rowMetrics.bodyHeight
   }
 
   get rangeMs() {
@@ -2386,41 +3374,11 @@ export default class VanillaGantt {
   }
 
   get virtualWindow() {
-    if (!this.isVirtualScrollEnabled) {
-      return {
-        xStart: 0,
-        xEnd: this.chartWidth,
-        timeStart: this.startTime,
-        timeEnd: this.endTime,
-        renderedForLeft: this.scrollLeft
-      }
-    }
-    const viewportWidth = this.horizontalViewportWidth
-    const xStart = Math.max(0, this.scrollLeft - this.virtualBufferPx)
-    const xEnd = Math.min(this.chartWidth, this.scrollLeft + viewportWidth + this.virtualBufferPx)
-    return {
-      xStart,
-      xEnd,
-      timeStart: this.startTime + xStart / this.pxPerMs,
-      timeEnd: this.startTime + xEnd / this.pxPerMs,
-      renderedForLeft: this.scrollLeft
-    }
+    return getVirtualWindow(this)
   }
 
   get virtualRowWindow() {
-    if (!this.isVerticalVirtualScrollEnabled) {
-      return {
-        yStart: 0,
-        yEnd: this.bodyHeight,
-        renderedForTop: this.scrollTop
-      }
-    }
-    const viewportHeight = this.verticalViewportHeight
-    return {
-      yStart: Math.max(0, this.scrollTop - this.virtualRowBufferPx),
-      yEnd: Math.min(this.bodyHeight, this.scrollTop + viewportHeight + this.virtualRowBufferPx),
-      renderedForTop: this.scrollTop
-    }
+    return getVirtualRowWindow(this)
   }
 
   get timelineScales() {
@@ -2429,7 +3387,27 @@ export default class VanillaGantt {
 
   get timelineUnitsByScale() {
     const window = this.activeVirtualWindow || this.virtualWindow
-    return this.timelineScales.map((scale, index) => this.createUnits(scale, index, window.timeStart, window.timeEnd))
+    const key = [
+      window.xStart,
+      window.xEnd,
+      window.timeStart,
+      window.timeEnd,
+      this.startTime,
+      this.endTime,
+      this.timelineScales.map(scale => [
+        scale.unit,
+        scale.step,
+        scale.colWidth,
+        scale.rowHeight,
+        scale.visible === false ? 0 : 1
+      ].join(':')).join('|')
+    ].join('/')
+    if (this.timelineUnitsCache && this.timelineUnitsCache.key === key) {
+      return this.timelineUnitsCache.units
+    }
+    const units = this.timelineScales.map((scale, index) => this.createUnits(scale, index, window.timeStart, window.timeEnd))
+    this.timelineUnitsCache = { key, units }
+    return units
   }
 
   get majorUnits() {
@@ -2442,14 +3420,17 @@ export default class VanillaGantt {
   }
 
   get verticalLines() {
+    if (this.currentRenderSnapshot) return this.currentRenderSnapshot.verticalLines
     return this.baseUnits.map(unit => ({ key: `line-${unit.key}`, x: unit.x, startDate: unit.startDate }))
   }
 
   get rowLines() {
+    if (this.currentRenderSnapshot) return this.currentRenderSnapshot.rowLines
     return this.renderedRowEntries.map(({ row, bottom }) => ({ key: this.recordKey(row), y: bottom }))
   }
 
   get backgroundShades() {
+    if (this.currentRenderSnapshot) return this.currentRenderSnapshot.backgroundShades
     const fill = this.grid.alternatingBackgroundColor
     if (!fill) return []
     return this.majorUnits.filter(unit => unit.dateIndex % 2 === 0).map(unit => ({
@@ -2461,51 +3442,21 @@ export default class VanillaGantt {
   }
 
   get flatRows() {
-    const rows = []
-    const walk = (items, level = 0) => {
-      items.forEach(record => {
-        rows.push({ ...record, __recordKey: this.recordKey(record), level })
-        if (record.children) walk(record.children, level + 1)
-      })
-    }
-    walk(this.options.records)
-    return rows
+    return this.rowMetrics.flatRows
   }
 
   get visibleRows() {
-    const rows = []
-    const walk = (items, level = 0) => {
-      items.forEach(record => {
-        const normalized = { ...record, __recordKey: this.recordKey(record), level }
-        rows.push(normalized)
-        if (record.children && this.isExpanded(normalized)) {
-          walk(record.children, level + 1)
-        }
-      })
-    }
-    walk(this.options.records)
-    return rows
+    return this.rowMetrics.visibleRows
   }
 
   get visibleRowEntries() {
-    let top = 0
-    return this.visibleRows.map(row => {
-      const height = this.rowHeight(row)
-      const entry = {
-        row,
-        top,
-        bottom: top + height,
-        height
-      }
-      top += height
-      return entry
-    })
+    return this.rowMetrics.visibleRowEntries
   }
 
   get renderedRowEntries() {
     if (!this.isVerticalVirtualScrollEnabled) return this.visibleRowEntries
     const window = this.activeVirtualRowWindow || this.virtualRowWindow
-    return this.visibleRowEntries.filter(entry => entry.bottom >= window.yStart && entry.top <= window.yEnd)
+    return this.renderedEntriesInWindow(window)
   }
 
   get renderedRows() {
@@ -2513,6 +3464,7 @@ export default class VanillaGantt {
   }
 
   get visibleRowIds() {
+    if (this.currentRenderSnapshot) return this.currentRenderSnapshot.visibleRowIds
     return this.renderedRows.reduce((ids, row) => {
       ids[this.recordKey(row)] = true
       return ids
@@ -2520,10 +3472,7 @@ export default class VanillaGantt {
   }
 
   get rowById() {
-    return this.flatRows.reduce((map, row) => {
-      map[this.recordKey(row)] = row
-      return map
-    }, {})
+    return this.rowMetrics.rowById
   }
 
   get laneByKey() {
@@ -2534,34 +3483,21 @@ export default class VanillaGantt {
   }
 
   get allTasks() {
-    const tasks = []
-    const tasksField = this.taskBar.tasksField
-    const walk = records => {
-      records.forEach(record => {
-        const recordKey = this.recordKey(record)
-        const rowTasks = Array.isArray(record[tasksField]) ? record[tasksField] : []
-        rowTasks.forEach(task => {
-          tasks.push({
-            ...task,
-            __rowId: recordKey
-          })
-        })
-        if (record.children) walk(record.children)
-      })
-    }
-    walk(this.options.records)
-    return tasks
+    return this.rowMetrics.allTasks
   }
 
   get renderTasks() {
+    if (this.currentRenderSnapshot) return this.currentRenderSnapshot.renderTasks
     return [...this.parentTimelineTasks, ...this.visibleTasks]
   }
 
   get stripedTasks() {
+    if (this.currentRenderSnapshot) return this.currentRenderSnapshot.stripedTasks
     return this.renderTasks.filter(task => task.striped)
   }
 
   get visibleMilestones() {
+    if (this.currentRenderSnapshot) return this.currentRenderSnapshot.visibleMilestones
     const milestones = []
     this.visibleTasks.forEach(task => {
       this.taskMilestones(task).forEach((milestone, index) => {
@@ -2575,6 +3511,7 @@ export default class VanillaGantt {
   }
 
   get visibleTasks() {
+    if (this.currentRenderSnapshot) return this.currentRenderSnapshot.visibleTasks
     const tasks = []
     const tasksField = this.taskBar.tasksField
     this.renderedRowEntries.forEach(({ row, top }) => {
@@ -2594,6 +3531,7 @@ export default class VanillaGantt {
   }
 
   get parentTimelineTasks() {
+    if (this.currentRenderSnapshot) return this.currentRenderSnapshot.parentTimelineTasks
     const tasks = []
     this.renderedRowEntries.forEach(({ row, top }) => {
       if (!row.children || this.isExpanded(row)) return
@@ -2635,12 +3573,14 @@ export default class VanillaGantt {
   }
 
   get visibleBackgroundRanges() {
+    if (this.currentRenderSnapshot) return this.currentRenderSnapshot.visibleBackgroundRanges
     return (this.grid.backgroundRanges || []).filter(range => {
       return toTime(range.endDate) > this.virtualWindow.timeStart && toTime(range.startDate) < this.virtualWindow.timeEnd
     })
   }
 
   get visibleRowBackgroundRanges() {
+    if (this.currentRenderSnapshot) return this.currentRenderSnapshot.visibleRowBackgroundRanges
     return (this.grid.rowBackgroundRanges || []).filter(range => {
       return this.visibleRowIds[range.recordKey] &&
         !this.isExpandedParentRow(range.recordKey) &&
@@ -2655,9 +3595,10 @@ export default class VanillaGantt {
   }
 
   get taskLayoutByKey() {
+    if (this.currentRenderSnapshot) return this.currentRenderSnapshot.taskLayoutByKey
     return this.renderTasks.reduce((map, task) => {
       const key = this.taskKey(task)
-      if (!key) return map
+      if (key === undefined || key === null) return map
       const y = this.taskY(task)
       const height = this.taskRenderHeight(task)
       map[key] = {
@@ -2673,12 +3614,14 @@ export default class VanillaGantt {
   }
 
   get visibleLinks() {
+    if (this.currentRenderSnapshot) return this.currentRenderSnapshot.visibleLinks
     return this.activeNormalizedLinks.filter(link => {
       return this.taskLayoutByKey[link.from] && this.taskLayoutByKey[link.to]
     })
   }
 
   get activeNormalizedLinks() {
+    if (this.currentRenderSnapshot) return this.currentRenderSnapshot.activeNormalizedLinks
     if (this.activeLinkTaskKeys) {
       return this.normalizedLinks
     }
@@ -2686,66 +3629,36 @@ export default class VanillaGantt {
   }
 
   get normalizedLinks() {
-    const links = []
-    const used = new Set()
-    ;(this.dependency.links || []).forEach((link, linkIndex) => {
-      const fromKeys = toKeyList(link.from)
-      const toKeys = toKeyList(link.to)
-      const groupKey = link.id === undefined || link.id === null
-        ? `link-${linkIndex}`
-        : String(link.id)
-      fromKeys.forEach(from => {
-        toKeys.forEach(to => {
-          if (from === undefined || from === null || to === undefined || to === null) return
-          const uniqueKey = `${String(from)}->${String(to)}`
-          if (used.has(uniqueKey)) return
-          used.add(uniqueKey)
-          links.push({
-            ...link,
-            from,
-            to,
-            __groupKey: groupKey
-          })
-        })
-      })
-    })
-    return links
+    if (this.currentRenderSnapshot) return this.currentRenderSnapshot.normalizedLinks
+    return this.buildDependencySnapshot().normalizedLinks
+  }
+
+  get linkKeySet() {
+    if (this.currentRenderSnapshot) return this.currentRenderSnapshot.linkKeySet
+    return this.buildDependencySnapshot().linkKeySet
+  }
+
+  get linkAdjacencyByTaskKey() {
+    if (this.currentRenderSnapshot) return this.currentRenderSnapshot.linkAdjacencyByTaskKey
+    return this.buildDependencySnapshot().linkAdjacencyByTaskKey
+  }
+
+  get firstLinkGroupByTaskKey() {
+    if (this.currentRenderSnapshot) return this.currentRenderSnapshot.firstLinkGroupByTaskKey
+    return this.buildDependencySnapshot().firstLinkGroupByTaskKey
   }
 
   firstLinkGroupKeyByTask(taskKey) {
     if (taskKey === undefined || taskKey === null) return null
-    const link = this.normalizedLinks.find(item => item.from === taskKey || item.to === taskKey)
-    return link ? link.__groupKey : null
+    return this.firstLinkGroupByTaskKey[taskKey] || null
   }
 
   linkNetworkByTask(taskKey) {
-    if (taskKey === undefined || taskKey === null) return null
-    const links = this.normalizedLinks
-    if (!links.some(link => this.isSameKey(link.from, taskKey) || this.isSameKey(link.to, taskKey))) return null
-
-    const taskKeys = Object.create(null)
-    const queue = [taskKey]
-    taskKeys[taskKey] = true
-
-    while (queue.length) {
-      const current = queue.shift()
-      links.forEach(link => {
-        if (!this.isSameKey(link.from, current) && !this.isSameKey(link.to, current)) return
-        ;[link.from, link.to].forEach(nextKey => {
-          if (taskKeys[nextKey]) return
-          taskKeys[nextKey] = true
-          queue.push(nextKey)
-        })
-      })
-    }
-
-    return {
-      key: Object.keys(taskKeys).sort().join('|'),
-      taskKeys
-    }
+    return linkNetworkByTask(this, taskKey)
   }
 
   get connectedTaskKeys() {
+    if (this.currentRenderSnapshot) return this.currentRenderSnapshot.connectedTaskKeys
     return this.visibleLinks.reduce((map, link) => {
       map[link.from] = true
       map[link.to] = true

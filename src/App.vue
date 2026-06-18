@@ -6,6 +6,7 @@
       <router-link to="/table-columns">表格列</router-link>
       <router-link to="/timeline">时间轴</router-link>
       <router-link to="/virtual-timeline">虚拟长时间轴</router-link>
+      <router-link to="/performance-benchmark">性能基准</router-link>
       <router-link to="/auto-row-height">自适应行高</router-link>
       <router-link to="/capacity-usage">工位负载率</router-link>
       <router-link to="/row-drag">行拖拽</router-link>

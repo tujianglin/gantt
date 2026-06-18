@@ -41,6 +41,7 @@ export const DEFAULT_OPTIONS = {
   timelineHeader: {
     backgroundColor: '#fff',
     colWidth: 56,
+    minLabelWidth: 0,
     style: null,
     scales: [
       { unit: 'day', step: 1, rowHeight: 24 },
@@ -123,7 +124,21 @@ export const DEFAULT_OPTIONS = {
     enabled: false,
     text: '加载中...',
     className: '',
-    customLayout: null
+    customLayout: null,
+    bodyRenderSlice: true,
+    bodyRenderSliceBudget: 8
+  },
+  scrollbar: {
+    alwaysVisible: false,
+    width: 10,
+    height: 10,
+    dragRenderDelay: 80,
+    dragRenderMaxWait: 260
+  },
+  performance: {
+    enabled: false,
+    console: false,
+    onRender: null
   },
   markLine: null,
   onScroll: null

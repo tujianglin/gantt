@@ -94,6 +94,7 @@ export interface GanttTimelineScale {
   unit: GanttTimeUnit
   step: number
   colWidth?: number
+  minLabelWidth?: number
   startOfWeek?: 'sunday' | 'monday'
   visible?: boolean
   style?: GanttTimelineHeaderStyle
@@ -153,6 +154,7 @@ export interface GanttTaskListTableOptions {
 export interface GanttTimelineHeaderOptions {
   backgroundColor?: string
   colWidth?: number
+  minLabelWidth?: number
   style?: GanttTimelineHeaderStyle
   scales: GanttTimelineScale[]
   customLayout?: GanttRenderer<GanttTimelineRenderContext>
@@ -486,6 +488,37 @@ export interface GanttLoadingOptions {
   text?: string
   className?: string
   customLayout?: GanttRenderer<GanttLoadingContext>
+  bodyRenderSlice?: boolean
+  bodyRenderSliceBudget?: number
+}
+
+export interface GanttScrollbarOptions {
+  alwaysVisible?: boolean
+  width?: number
+  height?: number
+  dragRenderDelay?: number
+  dragRenderMaxWait?: number
+}
+
+export interface GanttRenderPerformancePayload {
+  type: 'body'
+  sliced?: boolean
+  duration: number
+  totalDuration: number
+  snapshotDuration: number
+  domDuration: number
+  renderedRowCount: number
+  visibleTaskCount: number
+  renderTaskCount: number
+  visibleLinkCount: number
+  visibleMilestoneCount: number
+  svgNodeCount: number
+}
+
+export interface GanttPerformanceOptions {
+  enabled?: boolean
+  console?: boolean
+  onRender?: (payload: GanttRenderPerformancePayload) => void
 }
 
 export interface VanillaGanttOptions {
@@ -504,6 +537,8 @@ export interface VanillaGanttOptions {
   grid?: GanttGridOptions
   virtualScroll?: GanttVirtualScrollOptions
   loading?: GanttLoadingOptions
+  scrollbar?: GanttScrollbarOptions
+  performance?: GanttPerformanceOptions
   markLine?: GanttMarkLine | GanttMarkLine[] | null
   onScroll?: (payload: GanttScrollPayload) => void
 }

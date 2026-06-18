@@ -4,6 +4,7 @@ import BasicDemo from './views/BasicDemo.vue'
 import TableColumnsDemo from './views/TableColumnsDemo.vue'
 import TimelineDemo from './views/TimelineDemo.vue'
 import VirtualTimelineDemo from './views/VirtualTimelineDemo.vue'
+import PerformanceBenchmarkDemo from './views/PerformanceBenchmarkDemo.vue'
 import AutoRowHeightDemo from './views/AutoRowHeightDemo.vue'
 import CapacityUsageDemo from './views/CapacityUsageDemo.vue'
 import RowDragDemo from './views/RowDragDemo.vue'
@@ -53,6 +54,14 @@ export default new Router({
       component: VirtualTimelineDemo,
       meta: {
         title: '虚拟长时间轴'
+      }
+    },
+    {
+      path: '/performance-benchmark',
+      name: 'performance-benchmark',
+      component: PerformanceBenchmarkDemo,
+      meta: {
+        title: '性能基准'
       }
     },
     {

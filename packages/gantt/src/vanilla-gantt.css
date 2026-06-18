@@ -38,10 +38,12 @@
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  contain: layout paint;
 }
 
 .vg-left-body-inner {
   will-change: transform;
+  contain: layout paint;
 }
 
 .vg-row {
@@ -244,16 +246,127 @@
   will-change: transform;
 }
 
-.vg-scroll {
+.vg-scroll-wrap {
   flex: 1;
   min-width: 0;
   min-height: 0;
+  position: relative;
+}
+
+.vg-scroll {
+  width: 100%;
+  height: 100%;
   overflow: auto;
   background: #f7fbfb;
+  scrollbar-color: #b7c9cf #eef4f5;
+  scrollbar-width: thin;
+  contain: layout paint;
+  overscroll-behavior: contain;
+}
+
+.vg-scroll--custom {
+  scrollbar-width: none;
+}
+
+.vg-scroll.vg-scroll--custom::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.vg-scroll::-webkit-scrollbar {
+  width: var(--vg-scrollbar-width, 10px);
+  height: var(--vg-scrollbar-height, 10px);
+}
+
+.vg-scroll::-webkit-scrollbar-track {
+  background: #eef4f5;
+}
+
+.vg-scroll::-webkit-scrollbar-thumb {
+  border: 2px solid #eef4f5;
+  border-radius: 999px;
+  background: #b7c9cf;
+}
+
+.vg-scroll::-webkit-scrollbar-thumb:hover {
+  background: #8fafb8;
+}
+
+.vg-scroll::-webkit-scrollbar-corner {
+  background: #eef4f5;
+}
+
+.vg-scrollbar {
+  position: absolute;
+  z-index: 8;
+  border-radius: 999px;
+  background: #eef4f5;
+  pointer-events: auto;
+  user-select: none;
+  touch-action: none;
+}
+
+.vg-scrollbar--vertical {
+  top: 0;
+  right: 0;
+  bottom: var(--vg-scrollbar-height, 10px);
+  width: var(--vg-scrollbar-width, 10px);
+}
+
+.vg-scrollbar--horizontal {
+  left: 0;
+  right: var(--vg-scrollbar-width, 10px);
+  bottom: 0;
+  height: var(--vg-scrollbar-height, 10px);
+}
+
+.vg-scrollbar-thumb {
+  border-radius: 999px;
+  background: #b7c9cf;
+  cursor: pointer;
+  will-change: transform;
+  transform: translate3d(0, 0, 0);
+  touch-action: none;
+}
+
+.vg-scrollbar--vertical .vg-scrollbar-thumb {
+  width: 100%;
+}
+
+.vg-scrollbar--horizontal .vg-scrollbar-thumb {
+  height: 100%;
+}
+
+.vg-scrollbar-thumb:hover {
+  background: #8fafb8;
+}
+
+.vg-scroll-wrap--dragging,
+.vg-scroll-wrap--dragging .vg-scrollbar-thumb {
+  cursor: grabbing;
+}
+
+.vg-scroll-wrap--dragging .vg-scrollbar-thumb {
+  background: #8fafb8;
+}
+
+.vg-scrollbar-corner {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  z-index: 8;
+  width: var(--vg-scrollbar-width, 10px);
+  height: var(--vg-scrollbar-height, 10px);
+  background: #eef4f5;
 }
 
 .vg-stage {
   min-height: 100%;
+  contain: layout paint;
+}
+
+.vg-scroll-wrap--dragging .vg-stage {
+  pointer-events: none;
 }
 
 .vg-svg,
