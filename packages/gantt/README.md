@@ -501,6 +501,7 @@ gantt.destroy()
 | `taskBar` | `GanttTaskBarOptions` | 见下方 | 任务条配置 |
 | `dependency` | `GanttDependencyOptions` | 见下方 | 依赖连接线配置 |
 | `grid` | `GanttGridOptions` | 见下方 | 时间区网格和背景配置 |
+| `virtualScroll` | `{ enabled?: boolean, bufferPx?: number }` | `{ enabled: false, bufferPx: 1200 }` | 横向虚拟渲染，长时间范围高密度刻度下只渲染视口附近内容 |
 | `markLine` | `GanttMarkLine \| GanttMarkLine[] \| null` | `null` | 标记线 |
 | `onScroll` | `(payload) => void` | `null` | 滚动回调，返回 `scrollLeft`、`scrollTop` |
 

@@ -21,6 +21,10 @@ export default class VanillaGantt {
     this.scrollTop = 0
     this.scrollLeft = 0
     this.disposers = []
+    this.virtualDisposers = []
+    this.taskMeasureFrames = []
+    this.virtualRenderFrame = null
+    this.activeVirtualWindow = null
     this.activeDrag = null
     this.activeRowDragKey = null
     this.activeTooltip = null
@@ -48,12 +52,25 @@ export default class VanillaGantt {
 
   cleanup() {
     this.hideTaskTooltip()
+    if (this.virtualRenderFrame) {
+      cancelAnimationFrame(this.virtualRenderFrame)
+      this.virtualRenderFrame = null
+    }
+    this.cleanupVirtualContent()
     this.disposers.forEach(dispose => dispose())
     this.disposers = []
   }
 
+  cleanupVirtualContent() {
+    this.taskMeasureFrames.forEach(frame => cancelAnimationFrame(frame))
+    this.taskMeasureFrames = []
+    this.virtualDisposers.forEach(dispose => dispose())
+    this.virtualDisposers = []
+  }
+
   render() {
     this.cleanup()
+    this.activeVirtualWindow = this.virtualWindow
 
     const root = el('div', 'vg')
     root.style.setProperty('--vg-left-width', `${this.tableWidth}px`)
@@ -149,9 +166,6 @@ export default class VanillaGantt {
     const minWidth = Number(sourceColumn.minWidth || 48)
     const maxWidth = Number(sourceColumn.maxWidth || 600)
     sourceColumn.width = Math.min(maxWidth, Math.max(minWidth, Math.round(width)))
-    if (typeof this.taskListTable.tableWidth === 'number') {
-      this.taskListTable.tableWidth = this.sourceTableColumns.reduce((total, item) => total + this.columnWidth(item), 0)
-    }
     this.syncTableLayout()
   }
 
@@ -457,7 +471,17 @@ export default class VanillaGantt {
     if (this.timelineHeader.backgroundColor) {
       svg.style.background = this.timelineHeader.backgroundColor
     }
+    this.timelineSvg = svg
+    this.renderTimelineSvgContent(svg)
 
+    stage.append(svg)
+    viewport.append(stage)
+    return viewport
+  }
+
+  renderTimelineSvgContent(svg = this.timelineSvg) {
+    if (!svg) return
+    svg.innerHTML = ''
     let y = 0
     this.timelineUnitsByScale.forEach((units, scaleIndex) => {
       const scale = this.timelineScales[scaleIndex]
@@ -467,10 +491,6 @@ export default class VanillaGantt {
       })
       y += height
     })
-
-    stage.append(svg)
-    viewport.append(stage)
-    return viewport
   }
 
   renderTimelineUnit(unit, y, height, scale, scaleIndex) {
@@ -515,8 +535,8 @@ export default class VanillaGantt {
       viewBox: `0 0 ${this.chartWidth} ${this.bodyHeight}`
     })
 
-    svg.append(this.renderDefs())
-    this.appendGrid(svg)
+    this.bodySvg = svg
+    this.renderBodySvgContent(svg)
     const onCanvasClick = () => {
       if (this.clearActiveLinkGroup()) this.render()
     }
@@ -526,6 +546,7 @@ export default class VanillaGantt {
     scroll.append(stage)
 
     const onScroll = () => {
+      const previousScrollLeft = this.scrollLeft
       this.scrollTop = scroll.scrollTop
       this.scrollLeft = scroll.scrollLeft
       if (this.leftBodyInner) {
@@ -537,12 +558,39 @@ export default class VanillaGantt {
       if (typeof this.options.onScroll === 'function') {
         this.options.onScroll({ scrollLeft: this.scrollLeft, scrollTop: this.scrollTop })
       }
+      if (previousScrollLeft !== this.scrollLeft && this.shouldRefreshVirtualWindow()) {
+        this.scheduleVirtualRender()
+      }
     }
     scroll.addEventListener('scroll', onScroll)
     this.disposers.push(() => scroll.removeEventListener('scroll', onScroll))
     this.scrollEl = scroll
 
     return scroll
+  }
+
+  renderBodySvgContent(svg = this.bodySvg) {
+    if (!svg) return
+    this.cleanupVirtualContent()
+    svg.innerHTML = ''
+    svg.append(this.renderDefs())
+    this.appendGrid(svg)
+  }
+
+  shouldRefreshVirtualWindow() {
+    if (!this.isVirtualScrollEnabled || !this.activeVirtualWindow) return false
+    const threshold = Math.max(240, this.virtualBufferPx * 0.5)
+    return Math.abs(this.scrollLeft - this.activeVirtualWindow.renderedForLeft) > threshold
+  }
+
+  scheduleVirtualRender() {
+    if (this.virtualRenderFrame) return
+    this.virtualRenderFrame = requestAnimationFrame(() => {
+      this.virtualRenderFrame = null
+      this.activeVirtualWindow = this.virtualWindow
+      this.renderTimelineSvgContent()
+      this.renderBodySvgContent()
+    })
   }
 
   renderDefs() {
@@ -642,7 +690,8 @@ export default class VanillaGantt {
 
   appendMarkLine(svg, markLine) {
     const x = this.timeToX(markLine.date)
-    if (x < 0 || x > this.chartWidth) return
+    const window = this.activeVirtualWindow || this.virtualWindow
+    if (x < window.xStart || x > window.xEnd) return
 
     const style = markLine.style || {}
     const line = this.line(x, 0, x, this.bodyHeight, style.lineColor || '#35cce0')
@@ -741,12 +790,28 @@ export default class VanillaGantt {
     })
     const custom = this.resolveContent(this.taskBar.customLayout, payload)
     fo.append(custom || this.renderDefaultTask(task))
+    this.scheduleTaskForeignObjectMeasure(fo, height)
     if (this.isTaskDimmed(task)) {
       fo.classList.add('vg-task-fo--dimmed')
       fo.style.opacity = String(this.dependency.dimOpacity === undefined ? 0.18 : this.dependency.dimOpacity)
     }
     this.bindTaskInteractions(fo, task)
     return fo
+  }
+
+  scheduleTaskForeignObjectMeasure(fo, fallbackHeight) {
+    const frame = requestAnimationFrame(() => {
+      this.taskMeasureFrames = this.taskMeasureFrames.filter(item => item !== frame)
+      const content = fo.firstElementChild
+      if (!(content instanceof HTMLElement)) return
+
+      const rectHeight = content.getBoundingClientRect().height
+      const measuredHeight = Math.ceil(Math.max(content.scrollHeight, content.offsetHeight, rectHeight))
+      if (measuredHeight > fallbackHeight) {
+        fo.setAttribute('height', String(measuredHeight))
+      }
+    })
+    this.taskMeasureFrames.push(frame)
   }
 
   renderMilestone(item) {
@@ -791,7 +856,7 @@ export default class VanillaGantt {
     node.addEventListener('mouseenter', onMouseEnter)
     node.addEventListener('mousemove', onMouseMove)
     node.addEventListener('mouseleave', onMouseLeave)
-    this.disposers.push(() => {
+    this.virtualDisposers.push(() => {
       node.removeEventListener('mouseenter', onMouseEnter)
       node.removeEventListener('mousemove', onMouseMove)
       node.removeEventListener('mouseleave', onMouseLeave)
@@ -841,7 +906,7 @@ export default class VanillaGantt {
     node.addEventListener('mousemove', onMouseMove)
     node.addEventListener('mouseleave', onMouseLeave)
     node.addEventListener('pointerdown', onPointerDown)
-    this.disposers.push(() => {
+    this.virtualDisposers.push(() => {
       node.removeEventListener('click', onClick)
       node.removeEventListener('contextmenu', onContextMenu)
       node.removeEventListener('mouseenter', onMouseEnter)
@@ -1457,17 +1522,33 @@ export default class VanillaGantt {
     return style.height || this.options.taskHeight
   }
 
-  createUnits(scale, scaleIndex) {
+  createUnits(scale, scaleIndex, rangeStartTime = this.startTime, rangeEndTime = this.endTime) {
     const units = []
     const unit = scale.unit || 'hour'
     const step = scale.step || 1
     let cursor = this.floorDate(new Date(this.startTime), unit, scale.startOfWeek)
     let dateIndex = 0
-    while (cursor.getTime() < this.endTime) {
+    const fixedStepMs = ['minute', 'hour', 'day', 'week'].includes(unit)
+      ? this.unitToMs(unit) * step
+      : 0
+    if (fixedStepMs > 0) {
+      const skipped = Math.max(0, Math.floor((rangeStartTime - cursor.getTime()) / fixedStepMs) - 1)
+      if (skipped > 0) {
+        cursor = new Date(cursor.getTime() + skipped * fixedStepMs)
+        dateIndex = skipped
+      }
+    } else {
+      while (this.addUnit(cursor, unit, step).getTime() <= rangeStartTime && cursor.getTime() < this.endTime) {
+        cursor = this.addUnit(cursor, unit, step)
+        dateIndex += 1
+      }
+    }
+
+    while (cursor.getTime() < this.endTime && cursor.getTime() < rangeEndTime) {
       const unitStart = Math.max(cursor.getTime(), this.startTime)
       const next = this.addUnit(cursor, unit, step)
       const unitEnd = Math.min(next.getTime(), this.endTime)
-      if (unitEnd > unitStart) {
+      if (unitEnd > rangeStartTime && unitStart < rangeEndTime && unitEnd > unitStart) {
         const info = {
           type: unit,
           unit,
@@ -1484,8 +1565,8 @@ export default class VanillaGantt {
         }
         info.label = this.formatTimelineLabel(scale, info)
         units.push(info)
-        dateIndex += 1
       }
+      dateIndex += 1
       cursor = next
     }
     return units
@@ -1585,6 +1666,11 @@ export default class VanillaGantt {
     return toTime(end) > this.startTime && toTime(start) < this.endTime
   }
 
+  overlapsVirtualRange(start, end) {
+    if (!this.isVirtualScrollEnabled) return this.overlapsRange(start, end)
+    return toTime(end) > this.virtualWindow.timeStart && toTime(start) < this.virtualWindow.timeEnd
+  }
+
   isPrimaryTask(task) {
     if (task.logistics) return false
     const lane = this.taskLane(task)
@@ -1648,6 +1734,10 @@ export default class VanillaGantt {
 
   get grid() {
     return this.options.grid || {}
+  }
+
+  get virtualScroll() {
+    return this.options.virtualScroll || {}
   }
 
   get tableWidth() {
@@ -1733,12 +1823,50 @@ export default class VanillaGantt {
     return Math.max(1, Math.ceil((this.rangeMs / this.scaleMs) * this.scalePx))
   }
 
+  get isVirtualScrollEnabled() {
+    return this.virtualScroll.enabled !== false
+  }
+
+  get horizontalViewportWidth() {
+    const scrollWidth = this.scrollEl && this.scrollEl.clientWidth ? this.scrollEl.clientWidth : 0
+    if (scrollWidth > 0) return scrollWidth
+    const containerWidth = this.container && this.container.clientWidth ? this.container.clientWidth : 0
+    return Math.max(1, containerWidth - this.tableWidth || 1200)
+  }
+
+  get virtualBufferPx() {
+    return Math.max(0, Number(this.virtualScroll.bufferPx === undefined ? 1200 : this.virtualScroll.bufferPx))
+  }
+
+  get virtualWindow() {
+    if (!this.isVirtualScrollEnabled) {
+      return {
+        xStart: 0,
+        xEnd: this.chartWidth,
+        timeStart: this.startTime,
+        timeEnd: this.endTime,
+        renderedForLeft: this.scrollLeft
+      }
+    }
+    const viewportWidth = this.horizontalViewportWidth
+    const xStart = Math.max(0, this.scrollLeft - this.virtualBufferPx)
+    const xEnd = Math.min(this.chartWidth, this.scrollLeft + viewportWidth + this.virtualBufferPx)
+    return {
+      xStart,
+      xEnd,
+      timeStart: this.startTime + xStart / this.pxPerMs,
+      timeEnd: this.startTime + xEnd / this.pxPerMs,
+      renderedForLeft: this.scrollLeft
+    }
+  }
+
   get timelineScales() {
     return (this.timelineHeader.scales || []).filter(scale => scale.visible !== false)
   }
 
   get timelineUnitsByScale() {
-    return this.timelineScales.map((scale, index) => this.createUnits(scale, index))
+    const window = this.activeVirtualWindow || this.virtualWindow
+    return this.timelineScales.map((scale, index) => this.createUnits(scale, index, window.timeStart, window.timeEnd))
   }
 
   get majorUnits() {
@@ -1765,7 +1893,7 @@ export default class VanillaGantt {
   get backgroundShades() {
     const fill = this.grid.alternatingBackgroundColor
     if (!fill) return []
-    return this.majorUnits.filter((unit, index) => index % 2 === 0).map(unit => ({
+    return this.majorUnits.filter(unit => unit.dateIndex % 2 === 0).map(unit => ({
       key: `shade-${unit.key}`,
       x: unit.x,
       width: unit.width,
@@ -1855,7 +1983,7 @@ export default class VanillaGantt {
       this.taskMilestones(task).forEach((milestone, index) => {
         const date = toTime(this.milestoneDate(milestone))
         if (!Number.isFinite(date)) return
-        if (date < this.startTime || date > this.endTime) return
+        if (date < this.virtualWindow.timeStart || date > this.virtualWindow.timeEnd) return
         milestones.push({ task, milestone, index })
       })
     })
@@ -1868,7 +1996,7 @@ export default class VanillaGantt {
       return row &&
         !row.children &&
         this.visibleRowIds[task.__rowId] &&
-        this.overlapsRange(this.taskStart(task), this.taskEnd(task))
+        this.overlapsVirtualRange(this.taskStart(task), this.taskEnd(task))
     })
   }
 
@@ -1880,7 +2008,7 @@ export default class VanillaGantt {
       const childTasks = this.allTasks.filter(task => {
         return descendantIds.includes(task.__rowId) &&
           this.isPrimaryTask(task) &&
-          this.overlapsRange(this.taskStart(task), this.taskEnd(task))
+          this.overlapsVirtualRange(this.taskStart(task), this.taskEnd(task))
       })
       if (!childTasks.length) return
 
@@ -1913,7 +2041,7 @@ export default class VanillaGantt {
 
   get visibleBackgroundRanges() {
     return (this.grid.backgroundRanges || []).filter(range => {
-      return toTime(range.endDate) > this.startTime && toTime(range.startDate) < this.endTime
+      return toTime(range.endDate) > this.virtualWindow.timeStart && toTime(range.startDate) < this.virtualWindow.timeEnd
     })
   }
 
@@ -1921,8 +2049,8 @@ export default class VanillaGantt {
     return (this.grid.rowBackgroundRanges || []).filter(range => {
       return this.visibleRowIds[range.recordKey] &&
         !this.isExpandedParentRow(range.recordKey) &&
-        toTime(range.endDate) > this.startTime &&
-        toTime(range.startDate) < this.endTime
+        toTime(range.endDate) > this.virtualWindow.timeStart &&
+        toTime(range.startDate) < this.virtualWindow.timeEnd
     })
   }
 

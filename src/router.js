@@ -3,9 +3,11 @@ import Router from 'vue-router'
 import BasicDemo from './views/BasicDemo.vue'
 import TableColumnsDemo from './views/TableColumnsDemo.vue'
 import TimelineDemo from './views/TimelineDemo.vue'
+import VirtualTimelineDemo from './views/VirtualTimelineDemo.vue'
 import AutoRowHeightDemo from './views/AutoRowHeightDemo.vue'
 import CapacityUsageDemo from './views/CapacityUsageDemo.vue'
 import RowDragDemo from './views/RowDragDemo.vue'
+import ContextMenuDemo from './views/ContextMenuDemo.vue'
 import TaskInteractionDemo from './views/TaskInteractionDemo.vue'
 import WorkOrderMilestoneDemo from './views/WorkOrderMilestoneDemo.vue'
 import WorkOrderStatusDemo from './views/WorkOrderStatusDemo.vue'
@@ -45,6 +47,14 @@ export default new Router({
       }
     },
     {
+      path: '/virtual-timeline',
+      name: 'virtual-timeline',
+      component: VirtualTimelineDemo,
+      meta: {
+        title: '虚拟长时间轴'
+      }
+    },
+    {
       path: '/auto-row-height',
       name: 'auto-row-height',
       component: AutoRowHeightDemo,
@@ -66,6 +76,14 @@ export default new Router({
       component: RowDragDemo,
       meta: {
         title: '行拖拽'
+      }
+    },
+    {
+      path: '/context-menu',
+      name: 'context-menu',
+      component: ContextMenuDemo,
+      meta: {
+        title: '右键菜单'
       }
     },
     {

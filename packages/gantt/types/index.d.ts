@@ -393,6 +393,11 @@ export interface GridHorizontalLineStyleContext {
 
 export type GanttRenderer<T> = (context: T) => Node | string | { rootContainer?: Node } | null | undefined
 
+export interface GanttVirtualScrollOptions {
+  enabled?: boolean
+  bufferPx?: number
+}
+
 export interface VanillaGanttOptions {
   records?: GanttRecord[]
   recordKeyField?: string
@@ -407,6 +412,7 @@ export interface VanillaGanttOptions {
   taskBar?: GanttTaskBarOptions
   dependency?: GanttDependencyOptions
   grid?: GanttGridOptions
+  virtualScroll?: GanttVirtualScrollOptions
   markLine?: GanttMarkLine | GanttMarkLine[] | null
   onScroll?: (payload: GanttScrollPayload) => void
 }

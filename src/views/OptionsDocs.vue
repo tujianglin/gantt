@@ -77,6 +77,7 @@ gantt.destroy()`,
             { name: 'rowHeight', type: "number | 'auto' / 78", description: "默认资源行高度。设置为 'auto' 时按当前行任务 offsetY + height 自动撑开，单行仍可用 record.height 覆盖。" },
             { name: 'taskHeight', type: 'number / 36', description: '默认任务条高度。' },
             { name: 'headerRowHeight', type: 'number / 24', description: '默认时间轴单行刻度高度。' },
+            { name: 'virtualScroll', type: 'object', description: '横向虚拟渲染配置，默认关闭。支持 enabled、bufferPx，用于长时间范围高密度刻度。' },
             { name: 'onScroll', type: 'function', description: '滚动回调，参数为 { scrollLeft, scrollTop }。' }
           ]
         },

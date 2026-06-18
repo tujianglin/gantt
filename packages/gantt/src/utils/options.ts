@@ -40,6 +40,10 @@ export function mergeOptions(base, patch) {
         ? patch.grid.rowBackgroundRanges
         : (base.grid && base.grid.rowBackgroundRanges) || []
     },
+    virtualScroll: {
+      ...(base.virtualScroll || {}),
+      ...(patch.virtualScroll || {})
+    },
     records: patch.records || base.records || []
   }
 }

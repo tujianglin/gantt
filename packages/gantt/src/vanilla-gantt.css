@@ -30,6 +30,7 @@
   background: #eef5f5;
   font-size: 13px;
   font-weight: 700;
+  overflow: hidden;
 }
 
 .vg-left-body {
@@ -109,8 +110,18 @@
 .vg-table-header-content {
   min-width: 0;
   width: 100%;
+  max-width: 100%;
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vg-table-header-content > * {
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

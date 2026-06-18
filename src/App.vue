@@ -5,9 +5,11 @@
       <router-link to="/basic">基础示例</router-link>
       <router-link to="/table-columns">表格列</router-link>
       <router-link to="/timeline">时间轴</router-link>
+      <router-link to="/virtual-timeline">虚拟长时间轴</router-link>
       <router-link to="/auto-row-height">自适应行高</router-link>
       <router-link to="/capacity-usage">工位负载率</router-link>
       <router-link to="/row-drag">行拖拽</router-link>
+      <router-link to="/context-menu">右键菜单</router-link>
       <router-link to="/task-interaction">任务交互</router-link>
       <router-link to="/work-order-milestone">工单里程碑</router-link>
       <router-link to="/work-order-status">工单状态图例</router-link>

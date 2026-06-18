@@ -96,6 +96,10 @@ export const DEFAULT_OPTIONS = {
     backgroundRanges: [],
     rowBackgroundRanges: []
   },
+  virtualScroll: {
+    enabled: false,
+    bufferPx: 1200
+  },
   markLine: null,
   onScroll: null
 }
