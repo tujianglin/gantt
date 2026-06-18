@@ -10,7 +10,7 @@ npm install @wimi/gantt
 
 ```js
 import { VanillaGantt } from '@wimi/gantt'
-import '@wimi/gantt/dist/VanillaGantt.css'
+import '@wimi/gantt/style.css'
 ```
 
 浏览器直接引入 UMD：
@@ -22,6 +22,27 @@ import '@wimi/gantt/dist/VanillaGantt.css'
   const { VanillaGantt } = window.VanillaGantt
 </script>
 ```
+
+## 独立开发和打包
+
+`packages/gantt` 是独立 TypeScript 工具包，不依赖外层 Vue demo 工程。进入包目录后可单独安装依赖并打包：
+
+```bash
+cd packages/gantt
+npm install
+npm run build
+```
+
+打包工具使用 Vite library mode，入口为 `src/index.ts`，产物输出到 `dist`：
+
+| 格式 | 文件 |
+| --- | --- |
+| ES Module | `dist/VanillaGantt.es.js` |
+| CommonJS | `dist/VanillaGantt.cjs` |
+| UMD | `dist/VanillaGantt.umd.js` |
+| CSS | `dist/VanillaGantt.css` |
+
+TypeScript 类型入口为 `types/index.d.ts`，由 `package.json` 的 `types` 和 `exports["."].types` 暴露。
 
 ## 最小示例
 

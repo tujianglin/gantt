@@ -2,11 +2,20 @@
   "name": "@wimi/gantt",
   "version": "0.1.0",
   "description": "Framework-agnostic SVG scheduling gantt chart.",
-  "main": "dist/VanillaGantt.common.js",
-  "module": "src/index.js",
-  "unpkg": "dist/VanillaGantt.umd.min.js",
+  "type": "module",
+  "main": "dist/VanillaGantt.cjs",
+  "module": "dist/VanillaGantt.es.js",
+  "unpkg": "dist/VanillaGantt.umd.js",
   "style": "dist/VanillaGantt.css",
   "types": "types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "import": "./dist/VanillaGantt.es.js",
+      "require": "./dist/VanillaGantt.cjs"
+    },
+    "./style.css": "./dist/VanillaGantt.css"
+  },
   "files": [
     "dist",
     "src",
@@ -14,10 +23,14 @@
     "README.md"
   ],
   "scripts": {
-    "build": "cd ../.. && vue-cli-service build --target lib --name VanillaGantt packages/gantt/src/index.js --dest packages/gantt/dist"
+    "build": "vite build"
   },
   "sideEffects": [
     "*.css",
     "src/*.css"
-  ]
+  ],
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16"
+  }
 }
