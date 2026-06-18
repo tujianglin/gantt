@@ -3,6 +3,7 @@ import Router from 'vue-router'
 import BasicDemo from './views/BasicDemo.vue'
 import TableColumnsDemo from './views/TableColumnsDemo.vue'
 import TimelineDemo from './views/TimelineDemo.vue'
+import AutoRowHeightDemo from './views/AutoRowHeightDemo.vue'
 import CapacityUsageDemo from './views/CapacityUsageDemo.vue'
 import RowDragDemo from './views/RowDragDemo.vue'
 import TaskInteractionDemo from './views/TaskInteractionDemo.vue'
@@ -41,6 +42,14 @@ export default new Router({
       component: TimelineDemo,
       meta: {
         title: '时间轴'
+      }
+    },
+    {
+      path: '/auto-row-height',
+      name: 'auto-row-height',
+      component: AutoRowHeightDemo,
+      meta: {
+        title: '自适应行高'
       }
     },
     {

@@ -472,7 +472,7 @@ gantt.destroy()
 | `taskKeyField` | `string` | `'id'` | 任务唯一 key 字段 |
 | `minDate` | `string \| number \| Date` | 自动取最小任务开始时间 | 时间轴开始时间 |
 | `maxDate` | `string \| number \| Date` | 自动取最大任务结束时间 | 时间轴结束时间 |
-| `rowHeight` | `number` | `78` | 默认行高 |
+| `rowHeight` | `number \| 'auto'` | `78` | 默认行高。设置为 `'auto'` 时按当前行任务的 `offsetY + height` 自动撑开 |
 | `taskHeight` | `number` | `36` | 默认任务条高度 |
 | `headerRowHeight` | `number` | `24` | 默认时间刻度行高 |
 | `taskListTable` | `GanttTaskListTableOptions` | 见下方 | 左侧表格配置 |
@@ -499,7 +499,7 @@ interface GanttRecord {
 }
 ```
 
-`children` 表示树形子节点；`expanded` 控制初始展开状态；`height` 可单独覆盖当前行行高。
+`children` 表示树形子节点；`expanded` 控制初始展开状态；`height` 可单独覆盖当前行行高。顶层 `rowHeight: 'auto'` 时，没有显式 `height` 的行会基于当前行任务的 `offsetY + height` 自动计算高度，适合一个资源包含多组计划、上料、下料的场景。
 
 ### tasks
 
@@ -653,6 +653,7 @@ renderCell: ({ value }) => `
 {
   barColor?: string
   completedBarColor?: string
+  height?: number
   width?: number
   cornerRadius?: number
   borderWidth?: number

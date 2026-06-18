@@ -2,6 +2,8 @@ export type GanttTimeValue = string | number | Date
 
 export type GanttTimeUnit = 'minute' | 'hour' | 'day' | 'week' | 'month' | 'year'
 
+export type GanttRowHeight = number | 'auto'
+
 export interface GanttRecord {
   id?: string | number
   name?: string
@@ -108,6 +110,7 @@ export interface GanttLineStyle {
 export interface GanttTaskBarStyle {
   barColor?: string
   completedBarColor?: string
+  height?: number
   width?: number
   cornerRadius?: number
   borderWidth?: number
@@ -396,7 +399,7 @@ export interface VanillaGanttOptions {
   taskKeyField?: string
   minDate?: GanttTimeValue
   maxDate?: GanttTimeValue
-  rowHeight?: number
+  rowHeight?: GanttRowHeight
   taskHeight?: number
   headerRowHeight?: number
   taskListTable?: GanttTaskListTableOptions

@@ -268,7 +268,7 @@ export default class VanillaGantt {
 
     this.visibleRows.forEach(row => {
       const rowEl = el('div', `vg-row${row.children ? ' vg-row--group' : ''}`)
-      rowEl.style.height = `${row.height || this.options.rowHeight}px`
+      rowEl.style.height = `${this.rowHeight(row)}px`
       rowEl.style.gridTemplateColumns = this.tableGridTemplateColumns
       this.tableColumns.forEach((column, columnIndex) => {
         rowEl.append(this.renderTableCell(row, column, columnIndex))
@@ -702,7 +702,7 @@ export default class VanillaGantt {
         this.timeToX(range.startDate),
         this.rowTop(range.recordKey) + (range.offsetY || 0),
         this.durationWidth(range.startDate, range.endDate),
-        range.height || this.options.rowHeight,
+        range.height || this.rowHeight(this.rowById[range.recordKey] || {}),
         range.color || range.fill || '#dcf8c9'
       )
       rect.setAttribute('opacity', range.opacity === undefined ? 1 : range.opacity)
@@ -1491,13 +1491,47 @@ export default class VanillaGantt {
     let top = 0
     for (const row of this.visibleRows) {
       if (this.recordKey(row) === recordKey) return top
-      top += row.height || this.options.rowHeight
+      top += this.rowHeight(row)
     }
     return 0
   }
 
   taskY(task) {
     return this.rowTop(task.__rowId) + this.taskOffsetY(task)
+  }
+
+  rowHeight(row) {
+    const explicitHeight = Number(row && row.height)
+    if (Number.isFinite(explicitHeight) && explicitHeight > 0) return explicitHeight
+
+    if (this.options.rowHeight === 'auto') {
+      return this.autoRowHeight(row)
+    }
+
+    const configuredHeight = Number(this.options.rowHeight)
+    return Number.isFinite(configuredHeight) && configuredHeight > 0
+      ? configuredHeight
+      : DEFAULT_OPTIONS.rowHeight
+  }
+
+  autoRowHeight(row) {
+    const tasks = row && Array.isArray(row[this.taskBar.tasksField]) ? row[this.taskBar.tasksField] : []
+    const taskBottom = tasks.reduce((bottom, task) => {
+      return Math.max(bottom, this.taskOffsetY(task) + this.autoRowTaskHeight(task))
+    }, 0)
+    return Math.max(DEFAULT_OPTIONS.rowHeight, Math.ceil(taskBottom + 8))
+  }
+
+  autoRowTaskHeight(task) {
+    if (!task) return DEFAULT_OPTIONS.taskHeight
+    const explicitHeight = Number(task.height)
+    if (Number.isFinite(explicitHeight) && explicitHeight > 0) return explicitHeight
+    const lane = this.taskLane(task)
+    if (lane && this.laneByKey[lane]) return this.laneByKey[lane].height
+    const configuredHeight = Number(this.options.taskHeight)
+    return Number.isFinite(configuredHeight) && configuredHeight > 0
+      ? configuredHeight
+      : DEFAULT_OPTIONS.taskHeight
   }
 
   taskOffsetY(task) {
@@ -1513,7 +1547,7 @@ export default class VanillaGantt {
     if (lane && this.laneByKey[lane]) return this.laneByKey[lane].height
     if (task.height) return task.height
     const style = this.taskStyle(task)
-    return style.width || this.options.taskHeight
+    return style.height || this.options.taskHeight
   }
 
   createUnits(scale, scaleIndex) {
@@ -1764,7 +1798,7 @@ export default class VanillaGantt {
   }
 
   get bodyHeight() {
-    return this.visibleRows.reduce((height, row) => height + (row.height || this.options.rowHeight), 0)
+    return this.visibleRows.reduce((height, row) => height + this.rowHeight(row), 0)
   }
 
   get rangeMs() {
@@ -1816,7 +1850,7 @@ export default class VanillaGantt {
   get rowLines() {
     let top = 0
     return this.visibleRows.map(row => {
-      top += row.height || this.options.rowHeight
+      top += this.rowHeight(row)
       return { key: this.recordKey(row), y: top }
     })
   }
@@ -1961,7 +1995,7 @@ export default class VanillaGantt {
         workStatus: this.aggregateWorkStatus(childTasks),
         completed: childTasks.every(task => task.completed),
         predecessorIncomplete: childTasks.some(task => task.predecessorIncomplete),
-        height: Math.max(28, (row.height || this.options.rowHeight) - 12),
+        height: Math.max(28, this.rowHeight(row) - 12),
         offsetY: 6,
         parentAggregate: true,
         __rowId: this.recordKey(row)
