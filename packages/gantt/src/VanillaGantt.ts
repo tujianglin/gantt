@@ -1,13 +1,42 @@
 import './vanilla-gantt.css'
 import { DEFAULT_MILESTONE_TOOLTIP, DEFAULT_OPTIONS, DEFAULT_TASK_TOOLTIP } from './config/defaultOptions'
+import {
+  appendGrid as renderBodyGrid,
+  appendGridSliced as renderBodyGridSliced,
+  renderBodySvgContent as renderBodySvg,
+  renderDefs as renderBodyDefs
+} from './core/bodyRenderer'
 import { buildDependencySnapshot, linkNetworkByTask } from './core/dependency'
+import { getCachedDependencySnapshot, invalidateDependencySnapshot } from './core/dependencyState'
+import {
+  hideTaskTooltip as hideMeasuredTaskTooltip,
+  positionTaskTooltip as positionMeasuredTaskTooltip,
+  scheduleTaskForeignObjectMeasure as scheduleTaskMeasure,
+  showMilestoneTooltip as showMeasuredMilestoneTooltip,
+  showTaskTooltip as showMeasuredTaskTooltip
+} from './core/measurements'
+import {
+  bindDelegatedLinkInteractions as bindDelegatedLinkEvents,
+  bindDelegatedLinkConnectorInteractions as bindDelegatedLinkConnectorEvents,
+  bindDelegatedTaskInteractions as bindDelegatedTaskEvents,
+  bindLinkConnector as bindLinkConnectorEvents,
+  bindMilestoneInteractions as bindMilestoneEvents,
+  bindTaskInteractions as bindTaskEvents
+} from './core/interactions'
 import { buildRenderSnapshot } from './core/renderSnapshot'
+import { clearTaskLayerPatchCache } from './core/renderLayers'
 import { createTaskLayoutByKey, getTaskLayout } from './core/taskLayout'
+import {
+  applyTimelineSvgViewport as applyTimelineViewport,
+  renderTimelineSvgContent as renderTimelineSvg,
+  renderTimelineUnit as renderTimelineUnitNode
+} from './core/timelineRenderer'
 import { getVirtualRowWindow, getVirtualWindow, renderedEntriesInWindow, shouldRefreshVirtualRows, shouldRefreshVirtualWindow } from './core/virtualScroll'
 import { HOUR } from './utils/constants'
 import { attrs, el, svgEl } from './utils/dom'
 import { mergeOptions } from './utils/options'
-import { alignToFlex, applyTableHeaderStyle, applyTimelineStyle, applyTimelineStyleToContent } from './utils/style'
+import { alignToFlex, applyTableHeaderStyle } from './utils/style'
+import { toKeyList } from './utils/list'
 import { formatDateTime, formatLocalDateTime, toTime } from './utils/time'
 
 export default class VanillaGantt {
@@ -47,6 +76,11 @@ export default class VanillaGantt {
     this.rowCache = null
     this.timelineUnitsCache = null
     this.currentRenderSnapshot = null
+    this.dependencyVersion = 0
+    this.cachedDependencySnapshot = null
+    this.cachedDependencySnapshotVersion = -1
+    this.cachedDependencyLinksRef = null
+    clearTaskLayerPatchCache(this)
     this.activeVirtualWindow = null
     this.activeVirtualRowWindow = null
     this.activeDrag = null
@@ -56,6 +90,7 @@ export default class VanillaGantt {
     this.activeLinkTaskKey = null
     this.activeLinkGroupKey = null
     this.activeLinkTaskKeys = null
+    this.activeSelectedLinkKey = null
     this.activeLinkCreate = null
     this.suppressClickUntil = 0
     this.suppressClickTaskKey = null
@@ -71,8 +106,12 @@ export default class VanillaGantt {
     const change = this.classifyOptionPatch(options)
     const nextOptions = mergeOptions(this.options, options)
     this.options = nextOptions
+    if (change.dependencyChanged) invalidateDependencySnapshot(this)
     if (change.timelineChanged) this.timelineUnitsCache = null
-    if (options.records || options.taskBar) this.taskMeasuredHeightByKey = {}
+    if (options.records || options.taskBar) {
+      this.taskMeasuredHeightByKey = {}
+      clearTaskLayerPatchCache(this)
+    }
     if (change.recordsChanged) this.invalidateRowCache()
     if (options.records && options.records !== previousRecords) {
       this.seedExpandedRows(options.records, true)
@@ -587,7 +626,7 @@ export default class VanillaGantt {
   }
 
   buildDependencySnapshot() {
-    return buildDependencySnapshot(this)
+    return getCachedDependencySnapshot(this, () => buildDependencySnapshot(this))
   }
 
   createTaskLayoutByKey(renderTasks) {
@@ -618,6 +657,7 @@ export default class VanillaGantt {
     if (this.loadingVisible) {
       root.append(this.renderLoadingOverlay())
     }
+    this.bindLinkDeleteKeyboard()
 
     this.container.innerHTML = ''
     this.container.append(root)
@@ -1120,68 +1160,15 @@ export default class VanillaGantt {
   }
 
   renderTimelineSvgContent(svg = this.timelineSvg) {
-    if (!svg) return
-    this.applyTimelineSvgViewport(svg)
-    svg.innerHTML = ''
-    const fragment = document.createDocumentFragment()
-    let y = 0
-    this.timelineUnitsByScale.forEach((units, scaleIndex) => {
-      const scale = this.timelineScales[scaleIndex]
-      const height = this.scaleRowHeight(scale)
-      units.forEach(unit => {
-        fragment.append(this.renderTimelineUnit(unit, y, height, scale, scaleIndex))
-      })
-      y += height
-    })
-    svg.append(fragment)
+    return renderTimelineSvg(this, svg)
   }
 
   applyTimelineSvgViewport(svg = this.timelineSvg) {
-    if (!svg) return
-    const window = this.activeVirtualWindow || this.virtualWindow
-    const width = Math.max(1, window.xEnd - window.xStart)
-    attrs(svg, {
-      width,
-      height: this.headerHeight,
-      viewBox: `${window.xStart} 0 ${width} ${this.headerHeight}`
-    })
-    svg.style.position = 'absolute'
-    svg.style.left = `${window.xStart}px`
-    svg.style.top = '0'
-    svg.style.width = `${width}px`
-    svg.style.height = `${this.headerHeight}px`
+    return applyTimelineViewport(this, svg)
   }
 
   renderTimelineUnit(unit, y, height, scale, scaleIndex) {
-    const fo = svgEl('foreignObject')
-    attrs(fo, {
-      x: unit.x,
-      y,
-      width: unit.width,
-        height
-      })
-    const shouldRenderContent = this.shouldRenderTimelineUnitContent(unit, scale)
-    const custom = shouldRenderContent
-      ? this.resolveContent(scale.customLayout || this.timelineHeader.customLayout, {
-        dateInfo: unit,
-        unit,
-        scale,
-        scaleIndex,
-        major: scaleIndex === 0,
-        gantt: this
-      })
-      : null
-    const style = this.timelineCellStyle(scale)
-    if (custom) {
-      applyTimelineStyleToContent(custom, this.timelineCustomCellStyle(scale))
-      fo.append(custom)
-    } else {
-      const cell = el('div', `vg-timeline-cell${scaleIndex === 0 ? ' vg-timeline-cell--major' : ''}`)
-      applyTimelineStyle(cell, style)
-      cell.textContent = shouldRenderContent ? unit.label : ''
-      fo.append(cell)
-    }
-    return fo
+    return renderTimelineUnitNode(this, unit, y, height, scale, scaleIndex)
   }
 
   shouldRenderTimelineUnitContent(unit, scale) {
@@ -1213,7 +1200,9 @@ export default class VanillaGantt {
     this.applyBodySvgViewport(svg)
     this.renderBodySvgContent(svg)
     const onCanvasClick = () => {
-      if (this.clearActiveLinkGroup()) this.render()
+      const clearedGroup = this.clearActiveLinkGroup()
+      const clearedLink = this.clearActiveLinkSelection()
+      if (clearedGroup || clearedLink) this.render()
     }
     svg.addEventListener('click', onCanvasClick)
     this.disposers.push(() => svg.removeEventListener('click', onCanvasClick))
@@ -1436,37 +1425,7 @@ export default class VanillaGantt {
   }
 
   renderBodySvgContent(svg = this.bodySvg) {
-    if (!svg) return
-    const totalStart = this.now()
-    this.cleanupVirtualContent()
-    this.applyBodySvgViewport(svg)
-    const snapshotStart = this.now()
-    this.currentRenderSnapshot = this.buildRenderSnapshot()
-    const snapshotEnd = this.now()
-    const domStart = snapshotEnd
-    svg.innerHTML = ''
-    svg.append(this.renderDefs())
-    if (this.shouldSliceBodyRender()) {
-      this.appendGridSliced(svg, this.currentRenderSnapshot, {
-        totalStart,
-        snapshotStart,
-        snapshotEnd,
-        domStart
-      })
-      return
-    }
-    this.appendGrid(svg)
-    this.bindDelegatedTaskInteractions(svg)
-    this.bindDelegatedLinkConnectorInteractions(svg)
-    const totalEnd = this.now()
-    this.emitBodyRenderPerformance(svg, this.currentRenderSnapshot, {
-      totalStart,
-      snapshotStart,
-      snapshotEnd,
-      domStart,
-      totalEnd,
-      sliced: false
-    })
+    return renderBodySvg(this, svg)
   }
 
   shouldSliceBodyRender() {
@@ -1478,6 +1437,7 @@ export default class VanillaGantt {
   emitBodyRenderPerformance(svg, snapshot, metrics) {
     if (!this.isPerformanceEnabled) return
     const totalEnd = metrics.totalEnd === undefined ? this.now() : metrics.totalEnd
+    const renderStats = metrics.renderStats || {}
     this.emitRenderPerformance({
       type: 'body',
       sliced: metrics.sliced === true,
@@ -1490,7 +1450,11 @@ export default class VanillaGantt {
       renderTaskCount: snapshot.renderTasks.length,
       visibleLinkCount: snapshot.visibleLinks.length,
       visibleMilestoneCount: snapshot.visibleMilestones.length,
-      svgNodeCount: svg.querySelectorAll('*').length
+      svgNodeCount: renderStats.nodeCount || 0,
+      taskNodeCount: renderStats.taskNodeCount || 0,
+      linkNodeCount: renderStats.linkNodeCount || 0,
+      milestoneNodeCount: renderStats.milestoneNodeCount || 0,
+      connectorNodeCount: renderStats.connectorNodeCount || 0
     })
   }
 
@@ -1592,239 +1556,15 @@ export default class VanillaGantt {
   }
 
   renderDefs() {
-    const defs = svgEl('defs')
-    const pattern = svgEl('pattern')
-    attrs(pattern, {
-      id: 'vg-diagonal-stripe',
-      patternUnits: 'userSpaceOnUse',
-      width: 8,
-      height: 8
-    })
-    const path = svgEl('path')
-    attrs(path, {
-      d: 'M-2,2 l4,-4 M0,8 l8,-8 M6,10 l4,-4',
-      stroke: '#86ddd4',
-      'stroke-width': 1
-    })
-    pattern.append(path)
-    defs.append(pattern)
-    return defs
+    return renderBodyDefs()
   }
 
   appendGrid(svg) {
-    const snapshot = this.currentRenderSnapshot || this.buildRenderSnapshot()
-    const xWindow = this.activeVirtualWindow || this.virtualWindow
-    const yWindow = this.activeVirtualRowWindow || this.virtualRowWindow
-    const viewportWidth = Math.max(1, xWindow.xEnd - xWindow.xStart)
-    const viewportHeight = Math.max(1, yWindow.yEnd - yWindow.yStart)
-    const fragment = document.createDocumentFragment()
-
-    if (this.grid.backgroundColor) {
-      fragment.append(this.rect(xWindow.xStart, yWindow.yStart, viewportWidth, viewportHeight, this.grid.backgroundColor))
-    }
-
-    snapshot.backgroundShades.forEach(shade => {
-      fragment.append(this.rect(shade.x, yWindow.yStart, shade.width, viewportHeight, shade.fill))
-    })
-
-    snapshot.visibleBackgroundRanges.forEach(range => {
-      const rect = this.rect(
-        this.timeToX(range.startDate),
-        yWindow.yStart,
-        this.durationWidth(range.startDate, range.endDate),
-        viewportHeight,
-        range.color || range.fill || '#edf1f1'
-      )
-      rect.setAttribute('opacity', range.opacity === undefined ? 1 : range.opacity)
-      fragment.append(rect)
-    })
-
-    snapshot.verticalLines.forEach((item, index) => {
-      const style = this.resolveStyle(this.grid.verticalLine, { index, dateIndex: index, date: item.startDate, ganttInstance: this })
-      const line = this.line(item.x, yWindow.yStart, item.x, yWindow.yEnd, style.lineColor || '#e8eeee')
-      this.applyLineStyle(line, style)
-      fragment.append(line)
-    })
-
-    snapshot.rowLines.forEach((item, index) => {
-      const style = this.resolveStyle(this.grid.horizontalLine, { index, ganttInstance: this })
-      const line = this.line(xWindow.xStart, item.y, xWindow.xEnd, item.y, style.lineColor || '#edf1f2')
-      this.applyLineStyle(line, style)
-      fragment.append(line)
-    })
-
-    snapshot.markLines.forEach(markLine => {
-      this.appendMarkLine(fragment, markLine)
-    })
-
-    snapshot.visibleRowBackgroundRanges.forEach(range => {
-      const rect = this.rect(
-        this.timeToX(range.startDate),
-        this.rowTop(range.recordKey) + (range.offsetY || 0),
-        this.durationWidth(range.startDate, range.endDate),
-        range.height || this.rowHeight(this.rowById[range.recordKey] || {}),
-        range.color || range.fill || '#dcf8c9'
-      )
-      rect.setAttribute('opacity', range.opacity === undefined ? 1 : range.opacity)
-      fragment.append(rect)
-    })
-
-    snapshot.stripedTasks.forEach(task => {
-      const layout = this.getTaskLayout(task, snapshot)
-      const rect = this.rect(
-        layout.x,
-        layout.y,
-        layout.width,
-        layout.height,
-        'url(#vg-diagonal-stripe)'
-      )
-      fragment.append(rect)
-    })
-
-    snapshot.renderTasks.forEach(task => {
-      fragment.append(this.renderTask(task))
-    })
-
-    snapshot.visibleMilestones.forEach(item => {
-      fragment.append(this.renderMilestone(item))
-    })
-
-    snapshot.visibleLinks.forEach(link => {
-      this.appendLink(fragment, link, snapshot)
-    })
-
-    this.appendLinkConnectors(fragment, snapshot)
-    svg.append(fragment)
+    return renderBodyGrid(this, svg)
   }
 
   appendGridSliced(svg, snapshot, metrics) {
-    const token = this.bodyRenderToken
-    const xWindow = snapshot.xWindow
-    const yWindow = snapshot.yWindow
-    const viewportWidth = Math.max(1, xWindow.xEnd - xWindow.xStart)
-    const viewportHeight = Math.max(1, yWindow.yEnd - yWindow.yStart)
-    const runners = []
-
-    const addRunner = (items, appendItem) => {
-      let index = 0
-      runners.push(deadline => {
-        while (index < items.length) {
-          appendItem(items[index], index)
-          index += 1
-          if (this.now() >= deadline) return false
-        }
-        return true
-      })
-    }
-
-    if (this.grid.backgroundColor) {
-      runners.push(() => {
-        svg.append(this.rect(xWindow.xStart, yWindow.yStart, viewportWidth, viewportHeight, this.grid.backgroundColor))
-        return true
-      })
-    }
-
-    addRunner(snapshot.backgroundShades, shade => {
-      svg.append(this.rect(shade.x, yWindow.yStart, shade.width, viewportHeight, shade.fill))
-    })
-
-    addRunner(snapshot.visibleBackgroundRanges, range => {
-      const rect = this.rect(
-        this.timeToX(range.startDate),
-        yWindow.yStart,
-        this.durationWidth(range.startDate, range.endDate),
-        viewportHeight,
-        range.color || range.fill || '#edf1f1'
-      )
-      rect.setAttribute('opacity', range.opacity === undefined ? 1 : range.opacity)
-      svg.append(rect)
-    })
-
-    addRunner(snapshot.verticalLines, (item, index) => {
-      const style = this.resolveStyle(this.grid.verticalLine, { index, dateIndex: index, date: item.startDate, ganttInstance: this })
-      const line = this.line(item.x, yWindow.yStart, item.x, yWindow.yEnd, style.lineColor || '#e8eeee')
-      this.applyLineStyle(line, style)
-      svg.append(line)
-    })
-
-    addRunner(snapshot.rowLines, (item, index) => {
-      const style = this.resolveStyle(this.grid.horizontalLine, { index, ganttInstance: this })
-      const line = this.line(xWindow.xStart, item.y, xWindow.xEnd, item.y, style.lineColor || '#edf1f2')
-      this.applyLineStyle(line, style)
-      svg.append(line)
-    })
-
-    addRunner(snapshot.markLines, markLine => {
-      this.appendMarkLine(svg, markLine)
-    })
-
-    addRunner(snapshot.visibleRowBackgroundRanges, range => {
-      const rect = this.rect(
-        this.timeToX(range.startDate),
-        this.rowTop(range.recordKey) + (range.offsetY || 0),
-        this.durationWidth(range.startDate, range.endDate),
-        range.height || this.rowHeight(this.rowById[range.recordKey] || {}),
-        range.color || range.fill || '#dcf8c9'
-      )
-      rect.setAttribute('opacity', range.opacity === undefined ? 1 : range.opacity)
-      svg.append(rect)
-    })
-
-    addRunner(snapshot.stripedTasks, task => {
-      const layout = this.getTaskLayout(task, snapshot)
-      svg.append(this.rect(layout.x, layout.y, layout.width, layout.height, 'url(#vg-diagonal-stripe)'))
-    })
-
-    addRunner(snapshot.renderTasks, task => {
-      svg.append(this.renderTask(task))
-    })
-
-    addRunner(snapshot.visibleMilestones, item => {
-      svg.append(this.renderMilestone(item))
-    })
-
-    addRunner(snapshot.visibleLinks, link => {
-      this.appendLink(svg, link, snapshot)
-    })
-
-    runners.push(() => {
-      this.appendLinkConnectors(svg, snapshot)
-      return true
-    })
-
-    let runnerIndex = 0
-    const run = () => {
-      if (token !== this.bodyRenderToken) return
-      const deadline = this.now() + this.bodyRenderSliceBudget
-      while (runnerIndex < runners.length) {
-        const done = runners[runnerIndex](deadline)
-        if (!done || this.now() >= deadline) break
-        runnerIndex += 1
-      }
-      if (runnerIndex < runners.length) {
-        this.bodyRenderFrame = requestAnimationFrame(run)
-        return
-      }
-
-      this.bodyRenderFrame = null
-      this.bindDelegatedTaskInteractions(svg)
-      this.bindDelegatedLinkConnectorInteractions(svg)
-      this.emitBodyRenderPerformance(svg, snapshot, {
-        ...metrics,
-        totalEnd: this.now(),
-        sliced: true
-      })
-      if (this.pendingHideLoadingAfterBodyRender) {
-        this.pendingHideLoadingAfterBodyRender = false
-        this.hideLoadingFrame = requestAnimationFrame(() => {
-          this.hideLoadingFrame = null
-          this.hideLoading()
-        })
-      }
-      if (this.customScrollbarUpdater) this.customScrollbarUpdater()
-    }
-
-    this.bodyRenderFrame = requestAnimationFrame(run)
+    return renderBodyGridSliced(this, svg, snapshot, metrics)
   }
 
   appendMarkLine(svg, markLine) {
@@ -1863,15 +1603,38 @@ export default class VanillaGantt {
     }
     const color = style.lineColor || link.color || '#168dff'
     const path = this.path(route.d, color)
+    const linkKey = this.linkKey(link)
+    const linkGroupKey = this.linkGroupKey(link)
     attrs(path, {
       fill: 'none',
       'stroke-linejoin': 'round',
-      'stroke-linecap': 'round'
+      'stroke-linecap': 'round',
+      'data-link-key': linkKey,
+      'data-link-group-key': linkGroupKey
     })
+    if (this.dependency.linkSelectable || this.dependency.linkDeletable) {
+      path.classList.add('vg-link--selectable')
+    }
+    if (this.isLinkSelected(link)) {
+      path.classList.add('vg-link--active')
+    }
     this.applyLineStyle(path, { lineWidth: 2, ...style })
     this.applyLinkPattern(path, lineMode.pattern, link)
     const startCircle = this.circle(route.start.x, route.start.y, 4, color)
     const arrow = this.arrow(route.end.x, route.end.y, route.direction, color)
+    ;[startCircle, arrow].forEach(node => {
+      attrs(node, {
+        'data-link-key': linkKey,
+        'data-link-group-key': linkGroupKey
+      })
+      if (this.dependency.linkSelectable || this.dependency.linkDeletable) {
+        node.classList.add('vg-link--selectable')
+      }
+      if (this.isLinkSelected(link)) {
+        node.classList.add('vg-link--active')
+      }
+    })
+    startCircle.classList.add('vg-link-start')
     if (this.isLinkDimmed(link)) {
       const opacity = String(this.dependency.dimOpacity === undefined ? 0.18 : this.dependency.dimOpacity)
       path.setAttribute('opacity', opacity)
@@ -1889,6 +1652,90 @@ export default class VanillaGantt {
     const pattern = link.linePattern || linkMode.pattern || (link.dashed ? 'dashed' : globalMode.pattern || 'solid')
     const path = link.pathMode || linkMode.path || globalMode.path || 'polyline'
     return { pattern, path }
+  }
+
+  linkKey(link) {
+    if (!link) return ''
+    return `${String(link.from)}->${String(link.to)}`
+  }
+
+  linkGroupKey(link) {
+    if (!link) return ''
+    if (link.__groupKey !== undefined && link.__groupKey !== null) return String(link.__groupKey)
+    if (link.id !== undefined && link.id !== null) return String(link.id)
+    return this.linkKey(link)
+  }
+
+  findLinkByKey(linkKey) {
+    if (!linkKey) return null
+    return this.normalizedLinks.find(link => this.linkKey(link) === String(linkKey)) || null
+  }
+
+  isLinkSelected(link) {
+    return !!this.activeSelectedLinkKey && this.activeSelectedLinkKey === this.linkKey(link)
+  }
+
+  activateLink(link, event) {
+    const nextKey = this.linkKey(link)
+    const changed = this.activeSelectedLinkKey !== nextKey
+    this.activeSelectedLinkKey = nextKey
+    this.activeSelectedLink = link
+    return changed
+  }
+
+  clearActiveLinkSelection() {
+    if (!this.activeSelectedLinkKey && !this.activeSelectedLink) return false
+    this.activeSelectedLinkKey = null
+    this.activeSelectedLink = null
+    return true
+  }
+
+  bindLinkDeleteKeyboard() {
+    const onKeyDown = event => {
+      if (event.key !== 'Delete' && event.key !== 'Backspace') return
+      const target = event.target
+      if (target && target.closest && target.closest('input, textarea, select, [contenteditable="true"]')) return
+      if (this.deleteActiveLink(event)) {
+        event.preventDefault()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    this.disposers.push(() => document.removeEventListener('keydown', onKeyDown))
+  }
+
+  deleteActiveLink(event) {
+    if (!this.dependency.linkDeletable || !this.activeSelectedLinkKey) return false
+    const link = this.findLinkByKey(this.activeSelectedLinkKey)
+    if (!link) {
+      this.clearActiveLinkSelection()
+      return false
+    }
+    const payload = {
+      link,
+      event,
+      ganttInstance: this,
+      gantt: this
+    }
+    if (typeof this.dependency.onLinkDelete === 'function' && this.dependency.onLinkDelete(payload) === false) {
+      return false
+    }
+
+    const groupKey = this.linkGroupKey(link)
+    this.dependency.links = (this.dependency.links || []).filter(item => {
+      const itemGroupKey = item.id === undefined || item.id === null ? null : String(item.id)
+      if (itemGroupKey && itemGroupKey === groupKey) return false
+      return !this.linkContainsPair(item, this.activeSelectedLinkKey)
+    })
+    this.clearActiveLinkSelection()
+    invalidateDependencySnapshot(this)
+    this.renderBodySvgContent()
+    return true
+  }
+
+  linkContainsPair(link, pairKey) {
+    const fromKeys = toKeyList(link.from)
+    const toKeys = toKeyList(link.to)
+    return fromKeys.some(from => toKeys.some(to => `${String(from)}->${String(to)}` === pairKey))
   }
 
   applyLinkPattern(path, pattern = 'solid', link = {}) {
@@ -2053,28 +1900,15 @@ export default class VanillaGantt {
   }
 
   bindDelegatedLinkConnectorInteractions(svg) {
-    const onPointerDown = event => {
-      const target = event.target && event.target.closest
-        ? event.target.closest('.vg-link-connector--finish[data-task-key]')
-        : null
-      if (!target || !svg.contains(target)) return
-      const taskKey = target.getAttribute('data-task-key')
-      const layout = this.currentRenderSnapshot && this.currentRenderSnapshot.taskLayoutByKey
-        ? this.currentRenderSnapshot.taskLayoutByKey[taskKey]
-        : null
-      const task = layout ? layout.task : this.renderTasks.find(item => String(this.taskKey(item)) === String(taskKey))
-      if (!task) return
-      this.startLinkCreate(task, 'finish', event)
-    }
-    svg.addEventListener('pointerdown', onPointerDown)
-    this.virtualDisposers.push(() => svg.removeEventListener('pointerdown', onPointerDown))
+    return bindDelegatedLinkConnectorEvents(this, svg)
+  }
+
+  bindDelegatedLinkInteractions(svg) {
+    return bindDelegatedLinkEvents(this, svg)
   }
 
   bindLinkConnector(node, task, side) {
-    if (side !== 'finish') return
-    const onPointerDown = event => this.startLinkCreate(task, side, event)
-    node.addEventListener('pointerdown', onPointerDown)
-    this.virtualDisposers.push(() => node.removeEventListener('pointerdown', onPointerDown))
+    return bindLinkConnectorEvents(this, node, task, side)
   }
 
   startLinkCreate(task, side, event) {
@@ -2160,6 +1994,7 @@ export default class VanillaGantt {
 
     if (typeof this.dependency.onLinkCreate === 'function' && this.dependency.onLinkCreate(payload) === false) return
     this.dependency.links = [...(this.dependency.links || []), link]
+    invalidateDependencySnapshot(this)
     this.renderBodySvgContent()
   }
 
@@ -2403,125 +2238,11 @@ export default class VanillaGantt {
   }
 
   bindDelegatedTaskInteractions(svg) {
-    const taskNodeFromEvent = event => {
-      const target = event.target && event.target.closest
-        ? event.target.closest('.vg-task-fo[data-task-key]')
-        : null
-      return target && svg.contains(target) ? target : null
-    }
-    const taskFromNode = node => {
-      if (!node) return null
-      const key = node.getAttribute('data-task-key')
-      if (key === undefined || key === null) return null
-      const layout = this.currentRenderSnapshot && this.currentRenderSnapshot.taskLayoutByKey
-        ? this.currentRenderSnapshot.taskLayoutByKey[key]
-        : null
-      return layout ? layout.task : this.renderTasks.find(item => String(this.taskKey(item)) === String(key))
-    }
-
-    const onClick = event => {
-      const node = taskNodeFromEvent(event)
-      if (!node || event.__vgTaskClickHandled) return
-      event.__vgTaskClickHandled = true
-      const task = taskFromNode(node)
-      if (!task) return
-      const taskKey = this.taskKey(task)
-      if (this.suppressClickTaskKey === taskKey && Date.now() < this.suppressClickUntil) {
-        event.preventDefault()
-        event.stopImmediatePropagation()
-        return
-      }
-      const shouldRender = this.activateTaskLinkGroup(task)
-      this.callTaskCallback('onClick', task, event)
-      event.stopImmediatePropagation()
-      if (shouldRender) this.render()
-    }
-    const onContextMenu = event => {
-      const node = taskNodeFromEvent(event)
-      if (!node || event.__vgTaskContextMenuHandled) return
-      event.__vgTaskContextMenuHandled = true
-      const task = taskFromNode(node)
-      if (!task || typeof this.taskBar.onContextMenu !== 'function') return
-      event.preventDefault()
-      event.stopImmediatePropagation()
-      this.callTaskCallback('onContextMenu', task, event)
-    }
-    const onPointerDown = event => {
-      const node = taskNodeFromEvent(event)
-      if (!node || event.__vgTaskPointerDownHandled) return
-      event.__vgTaskPointerDownHandled = true
-      const task = taskFromNode(node)
-      if (!task) return
-      this.startTaskDrag(node, task, event)
-    }
-    const onMouseOver = event => {
-      const node = taskNodeFromEvent(event)
-      if (!node) return
-      if (event.relatedTarget && node.contains(event.relatedTarget)) return
-      const task = taskFromNode(node)
-      if (!task) return
-      this.hoveredTaskKey = this.taskKey(task)
-      this.callTaskCallback('onMouseEnter', task, event)
-      this.showTaskTooltip(task, event)
-    }
-    const onMouseMove = event => {
-      if (!taskNodeFromEvent(event)) return
-      this.positionTaskTooltip(event)
-    }
-    const onMouseOut = event => {
-      const node = taskNodeFromEvent(event)
-      if (!node) return
-      if (event.relatedTarget && node.contains(event.relatedTarget)) return
-      const task = taskFromNode(node)
-      if (task) this.callTaskCallback('onMouseLeave', task, event)
-      this.hoveredTaskKey = null
-      this.hideTaskTooltip()
-    }
-
-    svg.addEventListener('click', onClick)
-    svg.addEventListener('contextmenu', onContextMenu)
-    svg.addEventListener('pointerdown', onPointerDown)
-    svg.addEventListener('mouseover', onMouseOver)
-    svg.addEventListener('mousemove', onMouseMove)
-    svg.addEventListener('mouseout', onMouseOut)
-    this.virtualDisposers.push(() => {
-      svg.removeEventListener('click', onClick)
-      svg.removeEventListener('contextmenu', onContextMenu)
-      svg.removeEventListener('pointerdown', onPointerDown)
-      svg.removeEventListener('mouseover', onMouseOver)
-      svg.removeEventListener('mousemove', onMouseMove)
-      svg.removeEventListener('mouseout', onMouseOut)
-    })
+    return bindDelegatedTaskEvents(this, svg)
   }
 
   scheduleTaskForeignObjectMeasure(fo, fallbackHeight, task = null) {
-    const key = task ? this.taskKey(task) : null
-    const cachedHeight = key !== undefined && key !== null ? this.taskMeasuredHeightByKey[key] : null
-    if (cachedHeight && cachedHeight > fallbackHeight) {
-      fo.setAttribute('height', String(cachedHeight))
-      return
-    }
-
-    this.taskMeasureQueue.push({ fo, fallbackHeight, key })
-    if (this.taskMeasureFrame) return
-    this.taskMeasureFrame = requestAnimationFrame(() => {
-      this.taskMeasureFrame = null
-      const queue = this.taskMeasureQueue
-      this.taskMeasureQueue = []
-      queue.forEach(item => {
-        const content = item.fo.firstElementChild
-        if (!(content instanceof HTMLElement)) return
-
-        const rectHeight = content.getBoundingClientRect().height
-        const measuredHeight = Math.ceil(Math.max(content.scrollHeight, content.offsetHeight, rectHeight))
-        if (item.key !== undefined && item.key !== null) {
-          this.taskMeasuredHeightByKey[item.key] = measuredHeight
-        }
-        if (measuredHeight > item.fallbackHeight) {
-          item.fo.setAttribute('height', String(measuredHeight))
-        }
-      })
-    })
+    return scheduleTaskMeasure(this, fo, fallbackHeight, task)
   }
 
   renderMilestone(item) {
@@ -2554,89 +2275,11 @@ export default class VanillaGantt {
   }
 
   bindMilestoneInteractions(node, item) {
-    const onMouseEnter = event => {
-      this.showMilestoneTooltip(item, event)
-    }
-    const onMouseMove = event => {
-      this.positionTaskTooltip(event)
-    }
-    const onMouseLeave = () => {
-      this.hideTaskTooltip()
-    }
-    node.addEventListener('mouseenter', onMouseEnter)
-    node.addEventListener('mousemove', onMouseMove)
-    node.addEventListener('mouseleave', onMouseLeave)
-    this.virtualDisposers.push(() => {
-      node.removeEventListener('mouseenter', onMouseEnter)
-      node.removeEventListener('mousemove', onMouseMove)
-      node.removeEventListener('mouseleave', onMouseLeave)
-    })
+    return bindMilestoneEvents(this, node, item)
   }
 
   bindTaskInteractions(node, task) {
-    if (this.isTaskDraggable(task)) {
-      node.classList.add('vg-task-fo--draggable')
-    }
-
-    const onClick = event => {
-      if (event.__vgTaskClickHandled) return
-      event.__vgTaskClickHandled = true
-      const taskKey = this.taskKey(task)
-      if (this.suppressClickTaskKey === taskKey && Date.now() < this.suppressClickUntil) {
-        event.preventDefault()
-        event.stopPropagation()
-        return
-      }
-      const shouldRender = this.activateTaskLinkGroup(task)
-      this.callTaskCallback('onClick', task, event)
-      event.stopPropagation()
-      if (shouldRender) this.render()
-    }
-    const onContextMenu = event => {
-      if (event.__vgTaskContextMenuHandled) return
-      event.__vgTaskContextMenuHandled = true
-      if (typeof this.taskBar.onContextMenu !== 'function') return
-      event.preventDefault()
-      this.callTaskCallback('onContextMenu', task, event)
-    }
-    const onMouseEnter = event => {
-      this.callTaskCallback('onMouseEnter', task, event)
-      this.showTaskTooltip(task, event)
-    }
-    const onMouseMove = event => {
-      this.positionTaskTooltip(event)
-    }
-    const onMouseLeave = event => {
-      this.callTaskCallback('onMouseLeave', task, event)
-      this.hideTaskTooltip()
-    }
-    const onPointerDown = event => {
-      if (event.__vgTaskPointerDownHandled) return
-      event.__vgTaskPointerDownHandled = true
-      this.startTaskDrag(node, task, event)
-    }
-
-    const eventTargets = [node]
-    Array.from(node.children || []).forEach(child => eventTargets.push(child))
-
-    eventTargets.forEach(target => {
-      target.addEventListener('click', onClick)
-      target.addEventListener('contextmenu', onContextMenu)
-      target.addEventListener('pointerdown', onPointerDown)
-    })
-    node.addEventListener('mouseenter', onMouseEnter)
-    node.addEventListener('mousemove', onMouseMove)
-    node.addEventListener('mouseleave', onMouseLeave)
-    this.virtualDisposers.push(() => {
-      eventTargets.forEach(target => {
-        target.removeEventListener('click', onClick)
-        target.removeEventListener('contextmenu', onContextMenu)
-        target.removeEventListener('pointerdown', onPointerDown)
-      })
-      node.removeEventListener('mouseenter', onMouseEnter)
-      node.removeEventListener('mousemove', onMouseMove)
-      node.removeEventListener('mouseleave', onMouseLeave)
-    })
+    return bindTaskEvents(this, node, task)
   }
 
   startTaskDrag(node, task, event) {
@@ -2755,58 +2398,19 @@ export default class VanillaGantt {
   }
 
   showTaskTooltip(task, event) {
-    const tooltip = this.taskTooltip
-    if (!tooltip || tooltip.visible === false) return
-
-    const payload = this.createTaskPayload(task, { event })
-    const content = this.resolveContent(tooltip.customLayout, payload) || this.renderDefaultTaskTooltip(payload)
-    if (!content) return
-
-    this.hideTaskTooltip()
-    const node = el('div', `vg-tooltip${tooltip.className ? ` ${tooltip.className}` : ''}`)
-    node.append(content)
-    document.body.append(node)
-    this.tooltipEl = node
-    this.activeTooltip = tooltip
-    this.positionTaskTooltip(event)
+    return showMeasuredTaskTooltip(this, task, event)
   }
 
   showMilestoneTooltip(item, event) {
-    const tooltip = this.milestoneTooltip
-    if (!tooltip || tooltip.visible === false) return
-
-    const payload = this.createMilestonePayload(item, { event })
-    const content = this.resolveContent(tooltip.customLayout, payload) || this.renderDefaultMilestoneTooltip(payload)
-    if (!content) return
-
-    this.hideTaskTooltip()
-    const node = el('div', `vg-tooltip${tooltip.className ? ` ${tooltip.className}` : ''}`)
-    node.append(content)
-    document.body.append(node)
-    this.tooltipEl = node
-    this.activeTooltip = tooltip
-    this.positionTaskTooltip(event)
+    return showMeasuredMilestoneTooltip(this, item, event)
   }
 
   positionTaskTooltip(event) {
-    if (!this.tooltipEl || !event) return
-    const tooltip = this.activeTooltip || this.taskTooltip || {}
-    const offsetX = tooltip.offsetX === undefined ? 12 : Number(tooltip.offsetX)
-    const offsetY = tooltip.offsetY === undefined ? 12 : Number(tooltip.offsetY)
-    const rect = this.tooltipEl.getBoundingClientRect()
-    const maxLeft = window.innerWidth - rect.width - 8
-    const maxTop = window.innerHeight - rect.height - 8
-    const left = Math.max(8, Math.min(maxLeft, event.clientX + offsetX))
-    const top = Math.max(8, Math.min(maxTop, event.clientY + offsetY))
-    this.tooltipEl.style.left = `${left}px`
-    this.tooltipEl.style.top = `${top}px`
+    return positionMeasuredTaskTooltip(this, event)
   }
 
   hideTaskTooltip() {
-    if (!this.tooltipEl) return
-    this.tooltipEl.remove()
-    this.tooltipEl = null
-    this.activeTooltip = null
+    return hideMeasuredTaskTooltip(this)
   }
 
   renderDefaultTaskTooltip(payload) {

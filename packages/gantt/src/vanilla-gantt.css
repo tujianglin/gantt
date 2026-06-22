@@ -487,6 +487,27 @@
   pointer-events: none;
 }
 
+.vg-link--selectable {
+  cursor: pointer;
+}
+
+.vg-link-path.vg-link--selectable {
+  pointer-events: stroke;
+}
+
+.vg-link-arrow.vg-link--selectable,
+.vg-link-start.vg-link--selectable {
+  pointer-events: auto;
+}
+
+.vg-link--active {
+  filter: drop-shadow(0 0 3px rgba(22, 141, 255, 0.55));
+}
+
+.vg-link-path.vg-link--active {
+  stroke-width: 4;
+}
+
 .vg-link-connector {
   pointer-events: auto;
   transition: r 0.14s ease, stroke-width 0.14s ease;

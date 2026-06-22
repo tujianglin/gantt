@@ -377,6 +377,7 @@ export interface GanttDependencyOptions {
   onLinkCreate?: (context: GanttLinkCreateContext) => false | void
   linkSelectable?: boolean
   linkDeletable?: boolean
+  onLinkDelete?: (context: { link: GanttTaskLink; event?: KeyboardEvent | MouseEvent; ganttInstance: VanillaGantt; gantt: VanillaGantt }) => false | void
 }
 
 export interface GanttBackgroundRange {
@@ -532,6 +533,11 @@ export interface GridHorizontalLineStyleContext {
   ganttInstance: VanillaGantt
 }
 
+/**
+ * Renderer return value. Returning a string parses it as an HTML fragment;
+ * callers must escape untrusted data. Prefer Node/rootContainer for external
+ * or user-provided content.
+ */
 export type GanttRenderer<T> = (context: T) => Node | string | { rootContainer?: Node } | null | undefined
 
 export interface GanttVirtualScrollOptions {
@@ -539,6 +545,7 @@ export interface GanttVirtualScrollOptions {
   bufferPx?: number
   rowEnabled?: boolean
   rowBufferPx?: number
+  patchRender?: boolean
 }
 
 export interface GanttLoadingContext extends GanttRenderContext {
@@ -576,6 +583,10 @@ export interface GanttRenderPerformancePayload {
   visibleLinkCount: number
   visibleMilestoneCount: number
   svgNodeCount: number
+  taskNodeCount?: number
+  linkNodeCount?: number
+  milestoneNodeCount?: number
+  connectorNodeCount?: number
 }
 
 export interface GanttPerformanceOptions {

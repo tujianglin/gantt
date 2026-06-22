@@ -204,7 +204,8 @@ export default {
           enabled: true,
           bufferPx: 2200,
           rowEnabled: true,
-          rowBufferPx: 7200
+          rowBufferPx: 7200,
+          patchRender: true
         },
         scrollbar: {
           alwaysVisible: true,

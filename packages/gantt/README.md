@@ -501,7 +501,7 @@ gantt.destroy()
 | `taskBar` | `GanttTaskBarOptions` | 见下方 | 任务条配置 |
 | `dependency` | `GanttDependencyOptions` | 见下方 | 依赖连接线配置 |
 | `grid` | `GanttGridOptions` | 见下方 | 时间区网格和背景配置 |
-| `virtualScroll` | `{ enabled?: boolean, bufferPx?: number, rowEnabled?: boolean, rowBufferPx?: number }` | `{ enabled: false, bufferPx: 1200, rowEnabled: true, rowBufferPx: 4800 }` | 虚拟渲染。开启后 x 轴只渲染视口附近时间内容，y 轴只渲染视口附近行 |
+| `virtualScroll` | `{ enabled?: boolean, bufferPx?: number, rowEnabled?: boolean, rowBufferPx?: number, patchRender?: boolean }` | `{ enabled: false, bufferPx: 1200, rowEnabled: true, rowBufferPx: 4800, patchRender: false }` | 虚拟渲染。开启后 x 轴只渲染视口附近时间内容，y 轴只渲染视口附近行；`patchRender` 可复用 layout 未变化的 task 节点，适合高密度横向滚动 |
 | `loading` | `{ enabled?: boolean, text?: string, className?: string, customLayout?: renderer, bodyRenderSlice?: boolean, bodyRenderSliceBudget?: number }` | `{ enabled: false, text: '加载中...', bodyRenderSlice: true, bodyRenderSliceBudget: 8 }` | `setOptions` 重渲染时显示加载层。`customLayout` 支持模板字符串自定义；开启 loading 时默认按帧分片追加 body SVG 节点，降低大刻度切换阻塞 |
 | `scrollbar` | `{ alwaysVisible?: boolean, width?: number, height?: number, dragRenderDelay?: number, dragRenderMaxWait?: number }` | `{ alwaysVisible: false, width: 10, height: 10, dragRenderDelay: 80, dragRenderMaxWait: 260 }` | 主滚动区滚动条配置。支持常显、设置滚动条宽高，以及自定义滚动条拖拽时虚拟渲染的空闲延迟和最大等待 |
 | `performance` | `{ enabled?: boolean, console?: boolean, onRender?: (payload) => void }` | `{ enabled: false, console: false }` | 性能日志配置。开启后可获取 body 渲染耗时、snapshot 耗时、可视任务数、连接线数和 SVG 节点数 |
@@ -748,8 +748,9 @@ taskBar: {
 | `linkConnector` | `{ width: 14, height: 14 }` | 连接点渲染配置。支持 `customLayout/startLayout/finishLayout` 模板字符串自定义 |
 | `linkCreateDisabledTaskKeys` | `[]` | 兼容字段，同时禁止指定任务作为输出和输入端点。推荐使用 `linkCreateRules` |
 | `onLinkCreate` | `null` | 拖拽创建连接回调，返回 `link`、`fromTask`、`toTask`、`fromSide`、`toSide` |
-| `linkSelectable` | `undefined` | 预留字段 |
-| `linkDeletable` | `undefined` | 预留字段 |
+| `linkSelectable` | `false` | 是否允许点击或右键选中连接线。选中后连接线会显示 active 样式 |
+| `linkDeletable` | `false` | 是否允许选中连接线后按 Delete/Backspace 删除 |
+| `onLinkDelete` | `null` | 删除连接线前回调，返回 `false` 可阻止内部删除 |
 
 `links`：
 
@@ -869,7 +870,7 @@ taskBar: {
 Node | string | { rootContainer?: Node } | null | undefined
 ```
 
-推荐使用模板字符串。组件内部会把字符串放入 `<template>` 解析成 DOM。
+返回 `string` 时，组件内部会把字符串放入 `<template>` 并作为 HTML 片段解析。字符串模板适合可信的静态片段；如果拼接业务数据，调用方必须自行转义不可信内容。需要承载用户输入或外部数据时，优先返回 `Node` 或 `{ rootContainer }`。
 
 ## 本项目内 demo
 

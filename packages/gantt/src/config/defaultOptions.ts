@@ -105,7 +105,10 @@ export const DEFAULT_OPTIONS = {
       finishLayout: null
     },
     linkCreateDisabledTaskKeys: [],
-    onLinkCreate: null
+    onLinkCreate: null,
+    linkSelectable: false,
+    linkDeletable: false,
+    onLinkDelete: null
   },
   grid: {
     backgroundColor: '#f7fbfb',
@@ -119,7 +122,8 @@ export const DEFAULT_OPTIONS = {
     enabled: false,
     bufferPx: 1200,
     rowEnabled: true,
-    rowBufferPx: 4800
+    rowBufferPx: 4800,
+    patchRender: false
   },
   loading: {
     enabled: false,

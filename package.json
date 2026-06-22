@@ -8,6 +8,9 @@
     "build:site": "npm run build:gantt && vue-cli-service build",
     "build:lib": "npm --prefix packages/gantt run build",
     "build:gantt": "npm --prefix packages/gantt run build",
+    "benchmark:gantt": "node scripts/benchmark-render.mjs",
+    "check:gantt-api": "node scripts/check-gantt-api.mjs",
+    "check:gantt-dist": "node scripts/check-gantt-dist.mjs",
     "lint": "vue-cli-service lint"
   },
   "dependencies": {

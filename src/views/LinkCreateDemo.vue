@@ -133,6 +133,8 @@ export default {
         dependency: {
           showLinks: true,
           highlightConnected: false,
+          linkSelectable: true,
+          linkDeletable: true,
           linkCreatable: true,
           linkCreateRules: {
             allowDuplicate: false,
@@ -155,7 +157,8 @@ export default {
           },
           linkLineStyle: { lineColor: '#168dff', lineWidth: 2 },
           links: null,
-          onLinkCreate: this.handleLinkCreate
+          onLinkCreate: this.handleLinkCreate,
+          onLinkDelete: this.handleLinkDelete
         },
         grid: {
           backgroundColor: '#fff',
@@ -239,6 +242,13 @@ export default {
         }
       }
       this.links = [...this.links, next]
+      this.options.dependency.links = this.links
+      if (this.gantt) this.gantt.setOptions({ dependency: { links: this.links } })
+      return false
+    },
+    handleLinkDelete({ link }) {
+      const key = `${String(link.from)}->${String(link.to)}`
+      this.links = this.links.filter(item => `${String(item.from)}->${String(item.to)}` !== key)
       this.options.dependency.links = this.links
       if (this.gantt) this.gantt.setOptions({ dependency: { links: this.links } })
       return false
