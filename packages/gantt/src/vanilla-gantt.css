@@ -25,6 +25,7 @@
 }
 
 .vg-left-header {
+  box-sizing: border-box;
   display: grid;
   align-items: center;
   border-bottom: 1px solid #dbe4e4;
@@ -47,6 +48,7 @@
 }
 
 .vg-row {
+  box-sizing: border-box;
   display: grid;
   align-items: stretch;
   border-bottom: 1px solid #edf1f1;
