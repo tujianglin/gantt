@@ -6,6 +6,8 @@ import TableColumnsDemo from './views/TableColumnsDemo.vue'
 import TimelineDemo from './views/TimelineDemo.vue'
 import VirtualTimelineDemo from './views/VirtualTimelineDemo.vue'
 import PerformanceBenchmarkDemo from './views/PerformanceBenchmarkDemo.vue'
+import DenseVisibleTasksDemo from './views/DenseVisibleTasksDemo.vue'
+import FeatureExtensionsDemo from './views/FeatureExtensionsDemo.vue'
 import AutoRowHeightDemo from './views/AutoRowHeightDemo.vue'
 import CapacityUsageDemo from './views/CapacityUsageDemo.vue'
 import RowDragDemo from './views/RowDragDemo.vue'
@@ -67,6 +69,22 @@ export default new Router({
       component: PerformanceBenchmarkDemo,
       meta: {
         title: '性能基准'
+      }
+    },
+    {
+      path: '/dense-visible-tasks',
+      name: 'dense-visible-tasks',
+      component: DenseVisibleTasksDemo,
+      meta: {
+        title: '高密度可视任务'
+      }
+    },
+    {
+      path: '/feature-extensions',
+      name: 'feature-extensions',
+      component: FeatureExtensionsDemo,
+      meta: {
+        title: '扩展能力'
       }
     },
     {

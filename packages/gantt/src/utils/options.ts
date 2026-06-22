@@ -56,6 +56,8 @@ export function mergeOptions(base, patch) {
       ...(base.performance || {}),
       ...(patch.performance || {})
     },
+    filter: mergeNestedOption(base.filter, patch.filter),
+    highlight: mergeNestedOption(base.highlight, patch.highlight),
     markLine: patch.markLine === undefined ? base.markLine : patch.markLine,
     onScroll: patch.onScroll === undefined ? base.onScroll : patch.onScroll,
     records: patch.records || base.records || []

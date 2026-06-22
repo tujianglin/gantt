@@ -70,18 +70,96 @@ export function collectVisibleTasks(gantt: any, renderedRowEntries: any[], xWind
   const tasksField = gantt.taskBar.tasksField
   renderedRowEntries.forEach(({ row, top }) => {
     if (row.children) return
-    const rowTasks = Array.isArray(row[tasksField]) ? row[tasksField] : []
+    const rowKey = gantt.recordKey(row)
+    const rowTasks = gantt.tasksInWindow
+      ? gantt.tasksInWindow(rowKey, xWindow)
+      : (Array.isArray(row[tasksField]) ? row[tasksField] : [])
+    if (gantt.denseRenderOptions) {
+      collectVisibleTasksForDenseRender(gantt, row, top, rowTasks, xWindow, tasks, rowKey)
+      return
+    }
     rowTasks.forEach(task => {
       if (!gantt.overlapsWindowRange(gantt.taskStart(task), gantt.taskEnd(task), xWindow)) return
       tasks.push({
         ...task,
-        __rowId: gantt.recordKey(row),
+        __rowId: rowKey,
         __rowRecord: row,
         __rowTop: top
       })
     })
   })
   return tasks
+}
+
+function collectVisibleTasksForDenseRender(
+  gantt: any,
+  row: Record<string, any>,
+  top: number,
+  rowTasks: Record<string, any>[],
+  xWindow: VirtualWindow,
+  tasks: Record<string, any>[],
+  rowKey: string | number
+) {
+  const groups: Record<string, any> = {}
+
+  rowTasks.forEach(task => {
+    if (!gantt.overlapsWindowRange(gantt.taskStart(task), gantt.taskEnd(task), xWindow)) return
+    if (!gantt.shouldDenseRenderTask(task)) {
+      tasks.push({
+        ...task,
+        __rowId: rowKey,
+        __rowRecord: row,
+        __rowTop: top
+      })
+      return
+    }
+
+    const style = gantt.denseTaskStyle(task, row)
+    const groupKey = `${rowKey}::${style.fill}::${style.opacity}::${style.className || ''}::${style.shape || 'rect'}`
+    const startTime = toTime(gantt.taskStart(task))
+    const endTime = toTime(gantt.taskEnd(task))
+    const x = gantt.timeToX(startTime)
+    const y = top + gantt.taskOffsetY(task)
+    const width = gantt.durationWidth(startTime, endTime)
+    const height = gantt.taskRenderHeight(task)
+
+    if (!groups[groupKey]) {
+      groups[groupKey] = {
+        [gantt.options.taskKeyField]: `__dense_${rowKey}_${Object.keys(groups).length}`,
+        [gantt.taskBar.startDateField]: startTime,
+        [gantt.taskBar.endDateField]: endTime,
+        [gantt.taskBar.statusField]: gantt.taskStatus(task),
+        __rowId: rowKey,
+        __rowRecord: row,
+        __rowTop: top,
+        __denseGroup: {
+          fill: style.fill,
+          opacity: style.opacity,
+          className: style.className,
+          shape: style.shape,
+          entries: [],
+          count: 0
+        },
+        height,
+        offsetY: y - top
+      }
+    }
+
+    const group = groups[groupKey]
+    group[gantt.taskBar.startDateField] = Math.min(group[gantt.taskBar.startDateField], startTime)
+    group[gantt.taskBar.endDateField] = Math.max(group[gantt.taskBar.endDateField], endTime)
+    group.__denseGroup.entries.push({
+      x,
+      y,
+      width,
+      height
+    })
+    group.__denseGroup.count += 1
+  })
+
+  Object.keys(groups).forEach(key => {
+    tasks.push(groups[key])
+  })
 }
 
 export function collectParentTimelineTasks(gantt: any, renderedRowEntries: any[], xWindow: VirtualWindow) {

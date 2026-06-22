@@ -62,6 +62,7 @@ export const DEFAULT_OPTIONS = {
     barStyle: null,
     projectStyle: null,
     customLayout: null,
+    denseRender: false,
     milestoneStyle: null,
     milestoneCustomLayout: null,
     milestoneTooltip: false,
@@ -140,6 +141,8 @@ export const DEFAULT_OPTIONS = {
     console: false,
     onRender: null
   },
+  filter: null,
+  highlight: null,
   markLine: null,
   onScroll: null
 }

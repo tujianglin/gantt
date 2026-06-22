@@ -505,8 +505,22 @@ gantt.destroy()
 | `loading` | `{ enabled?: boolean, text?: string, className?: string, customLayout?: renderer, bodyRenderSlice?: boolean, bodyRenderSliceBudget?: number }` | `{ enabled: false, text: '加载中...', bodyRenderSlice: true, bodyRenderSliceBudget: 8 }` | `setOptions` 重渲染时显示加载层。`customLayout` 支持模板字符串自定义；开启 loading 时默认按帧分片追加 body SVG 节点，降低大刻度切换阻塞 |
 | `scrollbar` | `{ alwaysVisible?: boolean, width?: number, height?: number, dragRenderDelay?: number, dragRenderMaxWait?: number }` | `{ alwaysVisible: false, width: 10, height: 10, dragRenderDelay: 80, dragRenderMaxWait: 260 }` | 主滚动区滚动条配置。支持常显、设置滚动条宽高，以及自定义滚动条拖拽时虚拟渲染的空闲延迟和最大等待 |
 | `performance` | `{ enabled?: boolean, console?: boolean, onRender?: (payload) => void }` | `{ enabled: false, console: false }` | 性能日志配置。开启后可获取 body 渲染耗时、snapshot 耗时、可视任务数、连接线数和 SVG 节点数 |
+| `filter` | `{ text?: string, statuses?: string[], rowKeys?: id[], taskKeys?: id[], startDate?: time, endDate?: time, row?: fn, task?: fn } \| null` | `null` | 行和任务筛选。筛选命中的行和任务会保留，任务筛选支持状态、时间范围和 predicate |
+| `highlight` | `{ rowKeys?: id[], taskKeys?: id[] } \| null` | `null` | 行和任务高亮，可配合定位 API 使用 |
 | `markLine` | `GanttMarkLine \| GanttMarkLine[] \| null` | `null` | 标记线 |
 | `onScroll` | `(payload) => void` | `null` | 滚动回调，返回 `scrollLeft`、`scrollTop` |
+
+### 实例方法
+
+| 方法 | 说明 |
+| --- | --- |
+| `setOptions(options)` | 增量更新配置 |
+| `setFilter(filter)` / `clearFilter()` | 设置或清空筛选 |
+| `setHighlight(highlight)` / `clearHighlight()` | 设置或清空行、任务高亮 |
+| `scrollToRow(rowKey, options?)` | 定位到资源行，`options.align` 支持 `start`、`center`、`end`、`nearest` |
+| `scrollToTask(taskKey, options?)` | 定位到任务，默认会同步高亮任务和所在行 |
+| `findTaskByKey(taskKey)` | 从当前可见任务索引中查找任务 |
+| `destroy()` | 销毁实例并清理 DOM 与事件 |
 
 ### records
 
@@ -658,6 +672,7 @@ renderCell: ({ value }) => `
 | `barStyle` | `null` | 普通任务默认样式，支持函数 |
 | `projectStyle` | `null` | 父节点聚合任务样式，支持函数 |
 | `customLayout` | `null` | 任务条自定义模板 |
+| `denseRender` | `false` | 高密度短任务批量渲染。开启后小于 `maxTaskWidth` 的任务会合并为少量 SVG path，适合只浏览密度的分钟级任务 |
 | `milestoneStyle` | `null` | 里程碑尺寸配置，支持函数 |
 | `milestoneCustomLayout` | `null` | 里程碑自定义模板，支持模板字符串 |
 | `milestoneTooltip` | `false` | 里程碑 tooltip，`true` 显示默认时间节点，也支持自定义模板 |

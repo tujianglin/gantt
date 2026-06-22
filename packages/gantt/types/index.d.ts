@@ -120,6 +120,23 @@ export interface GanttTaskBarStyle {
   minSize?: number
 }
 
+export interface GanttDenseTaskStyleContext extends GanttRenderContext {
+  taskRecord: GanttTaskRecord
+  task: GanttTaskRecord
+  rowRecord?: GanttRecord & { level: number }
+  row?: GanttRecord & { level: number }
+  ganttInstance: VanillaGantt
+}
+
+export interface GanttDenseRenderOptions {
+  enabled?: boolean
+  maxTaskWidth?: number
+  fill?: string | ((context: GanttDenseTaskStyleContext) => string)
+  opacity?: number | ((context: GanttDenseTaskStyleContext) => number)
+  className?: string | ((context: GanttDenseTaskStyleContext) => string)
+  shape?: 'rect' | 'circle'
+}
+
 export interface GanttTableColumn {
   field?: string
   title?: string
@@ -174,6 +191,7 @@ export interface GanttTaskBarOptions {
   barStyle?: GanttTaskBarStyle | ((args: GanttTaskBarInteractionContext) => GanttTaskBarStyle)
   projectStyle?: GanttTaskBarStyle | ((args: GanttTaskBarInteractionContext) => GanttTaskBarStyle)
   customLayout?: GanttRenderer<GanttTaskBarCustomLayoutContext>
+  denseRender?: boolean | GanttDenseRenderOptions
   milestoneStyle?: GanttMilestoneStyle | ((args: GanttMilestoneCustomLayoutContext) => GanttMilestoneStyle)
   milestoneCustomLayout?: GanttRenderer<GanttMilestoneCustomLayoutContext>
   milestoneTooltip?: boolean | GanttMilestoneTooltipOptions
@@ -210,6 +228,51 @@ export interface GanttMilestoneTooltipOptions {
   className?: string
   offsetX?: number
   offsetY?: number
+}
+
+export interface GanttFilterRowContext extends GanttRenderContext {
+  record: GanttRecord & { level?: number }
+  row: GanttRecord & { level?: number }
+  rowKey?: string | number
+  ganttInstance: VanillaGantt
+}
+
+export interface GanttFilterTaskContext extends GanttRenderContext {
+  taskRecord: GanttTaskRecord
+  task: GanttTaskRecord
+  rowRecord?: GanttRecord & { level?: number }
+  row?: GanttRecord & { level?: number }
+  taskKey?: string | number
+  rowKey?: string | number
+  startDate: Date
+  endDate: Date
+  ganttInstance: VanillaGantt
+}
+
+export interface GanttFilterOptions {
+  text?: string
+  statuses?: Array<string | number>
+  status?: string | number | Array<string | number>
+  rowKeys?: Array<string | number>
+  taskKeys?: Array<string | number>
+  startDate?: GanttTimeValue
+  endDate?: GanttTimeValue
+  includeRowTasksOnMatch?: boolean
+  row?: (context: GanttFilterRowContext) => boolean
+  task?: (context: GanttFilterTaskContext) => boolean
+}
+
+export interface GanttHighlightOptions {
+  rowKeys?: Array<string | number>
+  taskKeys?: Array<string | number>
+}
+
+export interface GanttScrollToOptions {
+  align?: 'start' | 'center' | 'end' | 'nearest'
+  alignX?: 'start' | 'center' | 'end' | 'nearest'
+  alignY?: 'start' | 'center' | 'end' | 'nearest'
+  rowAlign?: 'start' | 'center' | 'end' | 'nearest'
+  highlight?: boolean
 }
 
 export type GanttDependencyType =
@@ -539,6 +602,8 @@ export interface VanillaGanttOptions {
   loading?: GanttLoadingOptions
   scrollbar?: GanttScrollbarOptions
   performance?: GanttPerformanceOptions
+  filter?: GanttFilterOptions | null
+  highlight?: GanttHighlightOptions | null
   markLine?: GanttMarkLine | GanttMarkLine[] | null
   onScroll?: (payload: GanttScrollPayload) => void
 }
@@ -546,6 +611,13 @@ export interface VanillaGanttOptions {
 declare class VanillaGantt {
   constructor(container: string | HTMLElement, options?: VanillaGanttOptions)
   setOptions(options?: VanillaGanttOptions): void
+  setFilter(filter?: GanttFilterOptions | null): void
+  clearFilter(): void
+  setHighlight(highlight?: GanttHighlightOptions | null): void
+  clearHighlight(): void
+  scrollToRow(rowKey: string | number, options?: GanttScrollToOptions): boolean
+  scrollToTask(taskKey: string | number, options?: GanttScrollToOptions): boolean
+  findTaskByKey(taskKey: string | number): GanttTaskRecord | null
   destroy(): void
 }
 
