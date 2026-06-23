@@ -125,6 +125,9 @@ export default {
     openMenu({ task, row, event }) {
       event.preventDefault()
       event.stopPropagation()
+      if (this.gantt && typeof this.gantt.hideTaskTooltip === 'function') {
+        this.gantt.hideTaskTooltip()
+      }
       const menuWidth = 128
       const menuHeight = 84
       this.menu = {
