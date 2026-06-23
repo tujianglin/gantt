@@ -86,7 +86,12 @@ export default class VanillaGantt {
     this.activeDrag = null
     this.activeRowDragKey = null
     this.activeTooltip = null
+    this.activeTooltipKey = null
+    this.tooltipShowTimer = null
     this.hoveredTaskKey = null
+    this.hoveredTaskNode = null
+    this.tooltipPositionFrame = null
+    this.pendingTooltipPosition = null
     this.activeLinkTaskKey = null
     this.activeLinkGroupKey = null
     this.activeLinkTaskKeys = null
@@ -350,6 +355,8 @@ export default class VanillaGantt {
       this.taskMeasureFrame = null
     }
     this.taskMeasureQueue = []
+    this.hoveredTaskNode = null
+    this.hoveredTaskKey = null
     this.virtualDisposers.forEach(dispose => dispose())
     this.virtualDisposers = []
     this.currentRenderSnapshot = null

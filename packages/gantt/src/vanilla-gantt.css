@@ -422,6 +422,10 @@
   transition: opacity 0.16s ease;
 }
 
+.vg-task-fo--hover {
+  overflow: visible;
+}
+
 .vg-task-dense {
   pointer-events: none;
   shape-rendering: geometricPrecision;

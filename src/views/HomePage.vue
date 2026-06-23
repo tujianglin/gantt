@@ -70,6 +70,7 @@ export default {
         { path: '/dense-visible-tasks', title: '高密度可视任务', desc: '前 5 行每分钟一个 task，持续 10 天。' },
         { path: '/feature-extensions', title: '扩展能力', desc: '筛选、定位和高亮 API 示例。' },
         { path: '/work-order-status', title: '工单状态图例', desc: '树形工艺、状态图例和连接线高亮。' },
+        { path: '/work-order-distribution', title: '工单上下料', desc: '使用真实工单数据展示上料、下料配送单。' },
         { path: '/link-create', title: '拖拽连线', desc: '连接点模板、连接规则和线型配置。' },
         { path: '/auto-row-height', title: '自适应行高', desc: '多计划、多上下料任务自动撑开行高。' }
       ]

@@ -677,6 +677,7 @@ renderCell: ({ value }) => `
 | `milestoneCustomLayout` | `null` | 里程碑自定义模板，支持模板字符串 |
 | `milestoneTooltip` | `false` | 里程碑 tooltip，`true` 显示默认时间节点，也支持自定义模板 |
 | `clip` | `true` | 是否裁剪超出时间范围的任务 |
+| `hoverBringToFront` | `false` | 鼠标移入任务时是否把该任务提升到当前 SVG 图层最上方，并添加 `vg-task-fo--hover` 便于展示完整内容 |
 | `draggable` | `false` | 是否允许拖拽，默认不支持拖拽；只有配置为 `true` 或函数返回 `true` 才能拖拽 |
 | `dragStep` | `60000` | 拖拽吸附步长，单位毫秒 |
 | `tooltip` | `false` | Tooltip 配置，默认关闭 |
@@ -726,6 +727,7 @@ taskBar: {
     className: 'my-tooltip',
     offsetX: 12,
     offsetY: 12,
+    showDelay: 0,
     customLayout: ({ task, startDate, endDate }) => `
       <div>${task.title} ${startDate.toLocaleString()} - ${endDate.toLocaleString()}</div>
     `

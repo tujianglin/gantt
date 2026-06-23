@@ -56,21 +56,26 @@ export function bindDelegatedTaskInteractions(gantt: any, svg: SVGElement) {
     if (event.relatedTarget && node.contains(event.relatedTarget)) return
     const task = taskFromNode(node)
     if (!task) return
-    gantt.hoveredTaskKey = gantt.taskKey(task)
+    const taskKey = gantt.taskKey(task)
+    if (gantt.hoveredTaskKey === taskKey && gantt.hoveredTaskNode === node) return
+    promoteTaskNodeOnHover(gantt, node)
+    gantt.hoveredTaskKey = taskKey
     gantt.callTaskCallback('onMouseEnter', task, event)
     gantt.showTaskTooltip(task, event)
   }
   const onMouseMove = (event: any) => {
-    if (!taskNodeFromEvent(event)) return
+    if (!gantt.hoveredTaskNode && !taskNodeFromEvent(event)) return
     gantt.positionTaskTooltip(event)
   }
   const onMouseOut = (event: any) => {
     const node = taskNodeFromEvent(event)
     if (!node) return
     if (event.relatedTarget && node.contains(event.relatedTarget)) return
+    if (isPointerStillInsideNode(node, event)) return
     const task = taskFromNode(node)
     if (task) gantt.callTaskCallback('onMouseLeave', task, event)
     gantt.hoveredTaskKey = null
+    clearTaskNodeHover(gantt, node)
     gantt.hideTaskTooltip()
   }
 
@@ -88,6 +93,41 @@ export function bindDelegatedTaskInteractions(gantt: any, svg: SVGElement) {
     svg.removeEventListener('mousemove', onMouseMove)
     svg.removeEventListener('mouseout', onMouseOut)
   })
+}
+
+function promoteTaskNodeOnHover(gantt: any, node: Element) {
+  if (gantt.hoveredTaskNode === node) return
+  if (gantt.hoveredTaskNode) clearTaskNodeHover(gantt, gantt.hoveredTaskNode)
+  gantt.hoveredTaskNode = node
+  if (!gantt.taskBar.hoverBringToFront) return
+  node.classList.add('vg-task-fo--hover')
+  if (!node.parentNode) return
+  ;(node as any).__vgHoverOriginalParent = node.parentNode
+  ;(node as any).__vgHoverOriginalNextSibling = node.nextSibling
+  node.parentNode.appendChild(node)
+}
+
+function clearTaskNodeHover(gantt: any, node: Element) {
+  node.classList.remove('vg-task-fo--hover')
+  const parent = (node as any).__vgHoverOriginalParent
+  const nextSibling = (node as any).__vgHoverOriginalNextSibling
+  if (parent && node.parentNode === parent) {
+    if (!nextSibling || nextSibling.parentNode === parent) {
+      parent.insertBefore(node, nextSibling)
+    } else {
+      parent.appendChild(node)
+    }
+  }
+  delete (node as any).__vgHoverOriginalParent
+  delete (node as any).__vgHoverOriginalNextSibling
+  if (gantt.hoveredTaskNode === node) gantt.hoveredTaskNode = null
+}
+
+function isPointerStillInsideNode(node: Element, event: MouseEvent) {
+  if (typeof document === 'undefined' || typeof document.elementFromPoint !== 'function') return false
+  if (event.clientX === undefined || event.clientY === undefined) return false
+  const target = document.elementFromPoint(event.clientX, event.clientY)
+  return Boolean(target && node.contains(target))
 }
 
 export function bindDelegatedLinkConnectorInteractions(gantt: any, svg: SVGElement) {
@@ -188,6 +228,10 @@ export function bindTaskInteractions(gantt: any, node: Element, task: any) {
     gantt.callTaskCallback('onContextMenu', task, event)
   }
   const onMouseEnter = (event: MouseEvent) => {
+    const taskKey = gantt.taskKey(task)
+    if (gantt.hoveredTaskKey === taskKey && gantt.hoveredTaskNode === node) return
+    promoteTaskNodeOnHover(gantt, node)
+    gantt.hoveredTaskKey = taskKey
     gantt.callTaskCallback('onMouseEnter', task, event)
     gantt.showTaskTooltip(task, event)
   }
@@ -195,7 +239,10 @@ export function bindTaskInteractions(gantt: any, node: Element, task: any) {
     gantt.positionTaskTooltip(event)
   }
   const onMouseLeave = (event: MouseEvent) => {
+    if (isPointerStillInsideNode(node, event)) return
     gantt.callTaskCallback('onMouseLeave', task, event)
+    gantt.hoveredTaskKey = null
+    clearTaskNodeHover(gantt, node)
     gantt.hideTaskTooltip()
   }
   const onPointerDown = (event: any) => {

@@ -18,6 +18,7 @@
       <router-link to="/task-interaction">任务交互</router-link>
       <router-link to="/work-order-milestone">工单里程碑</router-link>
       <router-link to="/work-order-status">工单状态图例</router-link>
+      <router-link to="/work-order-distribution">工单上下料</router-link>
       <router-link to="/options">配置文档</router-link>
     </aside>
     <main class="app-main">

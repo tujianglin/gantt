@@ -1,22 +1,24 @@
 import Vue from 'vue'
 import Router from 'vue-router'
 import HomePage from './views/HomePage.vue'
-import BasicDemo from './views/BasicDemo.vue'
-import TableColumnsDemo from './views/TableColumnsDemo.vue'
-import TimelineDemo from './views/TimelineDemo.vue'
-import VirtualTimelineDemo from './views/VirtualTimelineDemo.vue'
-import PerformanceBenchmarkDemo from './views/PerformanceBenchmarkDemo.vue'
-import DenseVisibleTasksDemo from './views/DenseVisibleTasksDemo.vue'
-import FeatureExtensionsDemo from './views/FeatureExtensionsDemo.vue'
-import AutoRowHeightDemo from './views/AutoRowHeightDemo.vue'
-import CapacityUsageDemo from './views/CapacityUsageDemo.vue'
-import RowDragDemo from './views/RowDragDemo.vue'
-import ContextMenuDemo from './views/ContextMenuDemo.vue'
-import LinkCreateDemo from './views/LinkCreateDemo.vue'
-import TaskInteractionDemo from './views/TaskInteractionDemo.vue'
-import WorkOrderMilestoneDemo from './views/WorkOrderMilestoneDemo.vue'
-import WorkOrderStatusDemo from './views/WorkOrderStatusDemo.vue'
-import OptionsDocs from './views/OptionsDocs.vue'
+
+const BasicDemo = () => import('./views/BasicDemo.vue')
+const TableColumnsDemo = () => import('./views/TableColumnsDemo.vue')
+const TimelineDemo = () => import('./views/TimelineDemo.vue')
+const VirtualTimelineDemo = () => import('./views/VirtualTimelineDemo.vue')
+const PerformanceBenchmarkDemo = () => import('./views/PerformanceBenchmarkDemo.vue')
+const DenseVisibleTasksDemo = () => import('./views/DenseVisibleTasksDemo.vue')
+const FeatureExtensionsDemo = () => import('./views/FeatureExtensionsDemo.vue')
+const AutoRowHeightDemo = () => import('./views/AutoRowHeightDemo.vue')
+const CapacityUsageDemo = () => import('./views/CapacityUsageDemo.vue')
+const RowDragDemo = () => import('./views/RowDragDemo.vue')
+const ContextMenuDemo = () => import('./views/ContextMenuDemo.vue')
+const LinkCreateDemo = () => import('./views/LinkCreateDemo.vue')
+const TaskInteractionDemo = () => import('./views/TaskInteractionDemo.vue')
+const WorkOrderMilestoneDemo = () => import('./views/WorkOrderMilestoneDemo.vue')
+const WorkOrderStatusDemo = () => import('./views/WorkOrderStatusDemo.vue')
+const WorkOrderDistributionDemo = () => import('./views/WorkOrderDistributionDemo.vue')
+const OptionsDocs = () => import('./views/OptionsDocs.vue')
 
 Vue.use(Router)
 
@@ -149,6 +151,14 @@ export default new Router({
       component: WorkOrderStatusDemo,
       meta: {
         title: '工单状态图例'
+      }
+    },
+    {
+      path: '/work-order-distribution',
+      name: 'work-order-distribution',
+      component: WorkOrderDistributionDemo,
+      meta: {
+        title: '工单上下料'
       }
     },
     {

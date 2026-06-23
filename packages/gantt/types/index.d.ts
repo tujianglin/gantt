@@ -196,6 +196,7 @@ export interface GanttTaskBarOptions {
   milestoneCustomLayout?: GanttRenderer<GanttMilestoneCustomLayoutContext>
   milestoneTooltip?: boolean | GanttMilestoneTooltipOptions
   clip?: boolean
+  hoverBringToFront?: boolean
   draggable?: boolean | ((context: GanttTaskBarCustomLayoutContext) => boolean)
   dragStep?: number
   tooltip?: boolean | GanttTaskBarTooltipOptions
@@ -220,6 +221,7 @@ export interface GanttTaskBarTooltipOptions {
   className?: string
   offsetX?: number
   offsetY?: number
+  showDelay?: number
 }
 
 export interface GanttMilestoneTooltipOptions {
@@ -228,6 +230,7 @@ export interface GanttMilestoneTooltipOptions {
   className?: string
   offsetX?: number
   offsetY?: number
+  showDelay?: number
 }
 
 export interface GanttFilterRowContext extends GanttRenderContext {

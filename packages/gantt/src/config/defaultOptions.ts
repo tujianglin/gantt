@@ -3,7 +3,8 @@ export const DEFAULT_TASK_TOOLTIP = {
   customLayout: null,
   className: '',
   offsetX: 12,
-  offsetY: 12
+  offsetY: 12,
+  showDelay: 0
 }
 
 export const DEFAULT_MILESTONE_TOOLTIP = {
@@ -11,7 +12,8 @@ export const DEFAULT_MILESTONE_TOOLTIP = {
   customLayout: null,
   className: '',
   offsetX: 12,
-  offsetY: 12
+  offsetY: 12,
+  showDelay: 0
 }
 
 // Keep defaults data-only. Runtime logic belongs in VanillaGantt methods.
@@ -67,6 +69,7 @@ export const DEFAULT_OPTIONS = {
     milestoneCustomLayout: null,
     milestoneTooltip: false,
     clip: true,
+    hoverBringToFront: false,
     draggable: false,
     dragStep: 60 * 1000,
     tooltip: false,
