@@ -191,6 +191,7 @@ export interface GanttTaskBarOptions {
   barStyle?: GanttTaskBarStyle | ((args: GanttTaskBarInteractionContext) => GanttTaskBarStyle)
   projectStyle?: GanttTaskBarStyle | ((args: GanttTaskBarInteractionContext) => GanttTaskBarStyle)
   customLayout?: GanttRenderer<GanttTaskBarCustomLayoutContext>
+  offsetY?: number
   denseRender?: boolean | GanttDenseRenderOptions
   milestoneStyle?: GanttMilestoneStyle | ((args: GanttMilestoneCustomLayoutContext) => GanttMilestoneStyle)
   milestoneCustomLayout?: GanttRenderer<GanttMilestoneCustomLayoutContext>

@@ -672,6 +672,7 @@ renderCell: ({ value }) => `
 | `barStyle` | `null` | 普通任务默认样式，支持函数 |
 | `projectStyle` | `null` | 父节点聚合任务样式，支持函数 |
 | `customLayout` | `null` | 任务条自定义模板 |
+| `offsetY` | `10` | 普通任务默认行内 y 偏移，未配置 `task.offsetY` 且未命中 `lanes` 时生效 |
 | `denseRender` | `false` | 高密度短任务批量渲染。开启后小于 `maxTaskWidth` 的任务会合并为少量 SVG path，适合只浏览密度的分钟级任务 |
 | `milestoneStyle` | `null` | 里程碑尺寸配置，支持函数 |
 | `milestoneCustomLayout` | `null` | 里程碑自定义模板，支持模板字符串 |

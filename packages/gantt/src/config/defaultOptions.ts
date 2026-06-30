@@ -64,6 +64,7 @@ export const DEFAULT_OPTIONS = {
     barStyle: null,
     projectStyle: null,
     customLayout: null,
+    offsetY: 10,
     denseRender: false,
     milestoneStyle: null,
     milestoneCustomLayout: null,

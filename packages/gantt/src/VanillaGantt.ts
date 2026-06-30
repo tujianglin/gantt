@@ -2862,7 +2862,7 @@ export default class VanillaGantt {
     if (task.parentAggregate && task.offsetY !== undefined) return task.offsetY
     const lane = this.taskLane(task)
     if (lane && this.laneByKey[lane]) return this.laneByKey[lane].offset
-    return task.offsetY === undefined ? 10 : task.offsetY
+    return task.offsetY === undefined ? this.taskBar.offsetY : task.offsetY
   }
 
   taskRenderHeight(task) {

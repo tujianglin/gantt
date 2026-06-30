@@ -40,6 +40,11 @@ const checks = [
     defaultPattern: /denseRender:\s*false/
   },
   {
+    name: 'taskBar.offsetY',
+    typePattern: /interface GanttTaskBarOptions[\s\S]*customLayout\?:[\s\S]*offsetY\?:\s*number[\s\S]*denseRender\?:/,
+    defaultPattern: /offsetY:\s*10/
+  },
+  {
     name: 'virtualScroll.patchRender',
     typePattern: /patchRender\?:\s*boolean/,
     defaultPattern: /patchRender:\s*false/
@@ -59,6 +64,14 @@ if (/linkSelectable\s*\|\s*`undefined`\s*\|\s*预留字段/.test(readme) || /lin
 
 if (/svgNodeCount:\s*svg\.querySelectorAll\('\*'\)\.length/.test(vanillaGantt)) {
   failures.push('performance: body render metrics must not query all SVG nodes')
+}
+
+if (!/\?\s*this\.taskBar\.offsetY\s*:\s*task\.offsetY/.test(vanillaGantt)) {
+  failures.push('taskBar.offsetY: taskOffsetY should use taskBar.offsetY when task.offsetY is not set')
+}
+
+if (!/\|\s*`offsetY`\s*\|\s*`10`\s*\|/.test(readme)) {
+  failures.push('README: taskBar.offsetY is not documented')
 }
 
 if (failures.length) {
