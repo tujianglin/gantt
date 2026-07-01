@@ -120,6 +120,38 @@ export interface GanttTaskBarStyle {
   minSize?: number
 }
 
+export interface GanttRestTimeRange {
+  id?: string | number
+  startDate: GanttTimeValue
+  endDate: GanttTimeValue
+  recordKey?: string | number
+  [key: string]: unknown
+}
+
+export interface GanttRestTimeOptions {
+  enabled?: boolean
+  ranges?: GanttRestTimeRange[]
+  rowRanges?: GanttRestTimeRange[]
+  rowRangesField?: string
+  taskRangesField?: string
+  modeField?: string
+  renderMode?: 'dent'
+  dentHeight?: number
+  bridgeHeight?: number
+  minWidth?: number
+}
+
+export interface GanttRestTimeSegment {
+  startDate: Date
+  endDate: Date
+  startTime: number
+  endTime: number
+  left: number
+  width: number
+  leftPercent: number
+  widthPercent: number
+}
+
 export interface GanttDenseTaskStyleContext extends GanttRenderContext {
   taskRecord: GanttTaskRecord
   task: GanttTaskRecord
@@ -191,6 +223,7 @@ export interface GanttTaskBarOptions {
   barStyle?: GanttTaskBarStyle | ((args: GanttTaskBarInteractionContext) => GanttTaskBarStyle)
   projectStyle?: GanttTaskBarStyle | ((args: GanttTaskBarInteractionContext) => GanttTaskBarStyle)
   customLayout?: GanttRenderer<GanttTaskBarCustomLayoutContext>
+  restTime?: boolean | GanttRestTimeOptions
   offsetY?: number
   denseRender?: boolean | GanttDenseRenderOptions
   milestoneStyle?: GanttMilestoneStyle | ((args: GanttMilestoneCustomLayoutContext) => GanttMilestoneStyle)
@@ -483,6 +516,7 @@ export interface GanttTaskBarCustomLayoutContext extends GanttRenderContext {
   originalStartDate?: Date
   originalEndDate?: Date
   progress?: number
+  restTimeSegments?: GanttRestTimeSegment[]
   event?: Event
   ganttInstance: VanillaGantt
 }

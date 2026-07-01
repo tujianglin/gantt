@@ -65,6 +65,7 @@ export default {
     return {
       demos: [
         { path: '/basic', title: '基础示例', desc: '最小可用配置和基础任务条。' },
+        { path: '/rest-time-dent', title: '休息时间段', desc: '跨休息区任务条下凹，支持内置和自定义渲染。' },
         { path: '/virtual-timeline', title: '虚拟长时间轴', desc: '长时间范围、刻度切换和虚拟渲染。' },
         { path: '/performance-benchmark', title: '性能基准', desc: '10k/50k 行和连接线压测。' },
         { path: '/dense-visible-tasks', title: '高密度可视任务', desc: '前 5 行每分钟一个 task，持续 10 天。' },

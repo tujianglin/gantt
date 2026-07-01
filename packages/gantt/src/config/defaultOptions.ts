@@ -1,3 +1,5 @@
+import { DEFAULT_REST_TIME_OPTIONS } from '../core/restTime'
+
 export const DEFAULT_TASK_TOOLTIP = {
   visible: true,
   customLayout: null,
@@ -64,6 +66,7 @@ export const DEFAULT_OPTIONS = {
     barStyle: null,
     projectStyle: null,
     customLayout: null,
+    restTime: DEFAULT_REST_TIME_OPTIONS,
     offsetY: 10,
     denseRender: false,
     milestoneStyle: null,

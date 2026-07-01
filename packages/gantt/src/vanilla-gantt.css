@@ -417,6 +417,39 @@
   overflow: hidden;
 }
 
+.vg-task--rest-time-dent {
+  isolation: isolate;
+  border-top: 0;
+}
+
+.vg-task-rest-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.vg-task-rest-dent {
+  position: absolute;
+  top: 0;
+  bottom: var(--vg-task-rest-bridge-height, 8px);
+  min-height: var(--vg-task-rest-dent-height, 0);
+  background: var(--vg-task-rest-bg, #f7fbfb);
+  box-shadow: inset 1px 0 rgba(39, 65, 62, 0.08), inset -1px 0 rgba(39, 65, 62, 0.08);
+}
+
+.vg-task--rest-time-dent .vg-task-title,
+.vg-task--rest-time-dent .vg-task-meta,
+.vg-task--rest-time-dent .vg-task-progress,
+.vg-task--rest-time-dent .vg-task-lock {
+  z-index: 2;
+}
+
+.vg-task--rest-time-dent .vg-task-title,
+.vg-task--rest-time-dent .vg-task-meta {
+  position: relative;
+}
+
 .vg-task-fo {
   user-select: none;
   transition: opacity 0.16s ease;

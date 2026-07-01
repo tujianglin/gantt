@@ -280,6 +280,49 @@ customLayout: ({ task }) => `
 `
 ```
 
+## 休息时间段任务条下凹
+
+`taskBar.restTime` 只改变任务条视觉，不改变任务开始、结束时间，也不改变拖拽写回规则。全局休息段默认作用于所有任务，行和任务可以追加、覆盖或禁用休息段。
+
+```js
+const options = {
+  taskBar: {
+    restTime: {
+      enabled: true,
+      ranges: [
+        { startDate: '2026-03-30T12:00:00', endDate: '2026-03-30T13:30:00' }
+      ],
+      rowRangesField: 'restTimes',
+      taskRangesField: 'restTimes',
+      modeField: 'restTimeMode',
+      dentHeight: 12,
+      bridgeHeight: 8
+    },
+    customLayout: ({ task, restTimeSegments }) => {
+      return `
+        <div class="my-task">
+          <strong>${task.title || ''}</strong>
+          ${restTimeSegments.map(segment => `
+            <i
+              class="my-task-rest"
+              style="left:${segment.left}px;width:${segment.width}px"
+            ></i>
+          `).join('')}
+        </div>
+      `
+    }
+  }
+}
+```
+
+`restTimeMode` 支持：
+
+| 值 | 说明 |
+| --- | --- |
+| `append` 或不填 | 追加到全局和行级休息段 |
+| `override` | 覆盖上层休息段 |
+| `disabled` | 当前行或任务不应用休息段视觉 |
+
 ## 任务交互、拖拽和 Tooltip
 
 Tooltip 默认关闭。需要显示时配置 `taskBar.tooltip: true` 或传入对象。

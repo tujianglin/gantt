@@ -19,6 +19,7 @@ export function mergeOptions(base, patch) {
       ...baseTaskBar,
       ...patchTaskBar,
       tooltip: mergeNestedOption(baseTaskBar.tooltip, patchTaskBar.tooltip),
+      restTime: mergeNestedOption(baseTaskBar.restTime, patchTaskBar.restTime),
       lanes: patchTaskBar.lanes
         ? patchTaskBar.lanes
         : baseTaskBar.lanes || []

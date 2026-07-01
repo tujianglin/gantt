@@ -9,6 +9,11 @@ import {
 import { buildDependencySnapshot, linkNetworkByTask } from './core/dependency'
 import { getCachedDependencySnapshot, invalidateDependencySnapshot } from './core/dependencyState'
 import {
+  createRestTimeSegments,
+  normalizeRestTimeOptions,
+  resolveRestTimeRanges
+} from './core/restTime'
+import {
   hideTaskTooltip as hideMeasuredTaskTooltip,
   positionTaskTooltip as positionMeasuredTaskTooltip,
   scheduleTaskForeignObjectMeasure as scheduleTaskMeasure,
@@ -2137,7 +2142,7 @@ export default class VanillaGantt {
       y: layout.y
     })
     const custom = this.resolveContent(this.taskBar.customLayout, payload)
-    fo.append(custom || this.renderDefaultTask(task))
+    fo.append(custom || this.renderDefaultTask(task, payload))
     if (custom && task.height === undefined) {
       this.scheduleTaskForeignObjectMeasure(fo, height, task)
     }
@@ -2471,6 +2476,7 @@ export default class VanillaGantt {
       originalStartDate: extra.originalStartDate,
       originalEndDate: extra.originalEndDate,
       progress: this.taskProgress(task),
+      restTimeSegments: this.taskRestTimeSegments(task, width),
       event: extra.event,
       ganttInstance: this,
       gantt: this
@@ -2573,11 +2579,15 @@ export default class VanillaGantt {
     return formatLocalDateTime(new Date(time))
   }
 
-  renderDefaultTask(task) {
+  renderDefaultTask(task, payload = null) {
     const status = this.taskStatus(task)
     const root = el('div', `vg-task vg-task--${status || 'normal'}`)
     const style = this.taskStyle(task)
     this.applyTaskStyle(root, style, task)
+    const restTimeSegments = payload && payload.restTimeSegments ? payload.restTimeSegments : this.taskRestTimeSegments(task)
+    if (restTimeSegments.length) {
+      this.renderTaskRestTimeDent(root, restTimeSegments)
+    }
 
     const title = el('div', 'vg-task-title')
     title.textContent = this.taskLabel(task, this.taskBar.labelText)
@@ -2602,6 +2612,28 @@ export default class VanillaGantt {
     }
 
     return root
+  }
+
+  renderTaskRestTimeDent(root, restTimeSegments) {
+    const options = this.restTimeOptions
+    if (!options || options.renderMode !== 'dent') return
+    const layer = el('div', 'vg-task-rest-layer')
+    const bridgeHeight = Math.max(0, Number(options.bridgeHeight || 0))
+    const dentHeight = Math.max(0, Number(options.dentHeight || 0))
+    const background = this.grid.backgroundColor || '#f7fbfb'
+    root.classList.add('vg-task--rest-time-dent')
+    root.style.setProperty('--vg-task-rest-bg', background)
+    root.style.setProperty('--vg-task-rest-bridge-height', `${bridgeHeight}px`)
+    if (dentHeight > 0) root.style.setProperty('--vg-task-rest-dent-height', `${dentHeight}px`)
+
+    restTimeSegments.forEach(segment => {
+      const dent = el('i', 'vg-task-rest-dent')
+      dent.style.left = `${segment.left}px`
+      dent.style.width = `${segment.width}px`
+      layer.append(dent)
+    })
+
+    root.append(layer)
   }
 
   applyTaskStyle(node, style, task) {
@@ -3149,6 +3181,25 @@ export default class VanillaGantt {
 
   get taskBar() {
     return this.options.taskBar || {}
+  }
+
+  get restTimeOptions() {
+    return normalizeRestTimeOptions(this.taskBar.restTime)
+  }
+
+  taskRestTimeSegments(task, width) {
+    const options = this.restTimeOptions
+    if (!options) return []
+    const sourceTask = this.findSourceTask(task) || task
+    const row = task.__rowRecord || this.rowById[task.__rowId]
+    const ranges = resolveRestTimeRanges(this.taskBar.restTime, sourceTask, row, task.__rowId)
+    return createRestTimeSegments(
+      ranges,
+      this.taskStart(sourceTask),
+      this.taskEnd(sourceTask),
+      width === undefined ? this.durationWidth(this.taskStart(task), this.taskEnd(task)) : width,
+      options.minWidth
+    )
   }
 
   get filterOptions() {

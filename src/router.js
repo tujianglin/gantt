@@ -5,6 +5,7 @@ import HomePage from './views/HomePage.vue'
 const BasicDemo = () => import('./views/BasicDemo.vue')
 const TableColumnsDemo = () => import('./views/TableColumnsDemo.vue')
 const TimelineDemo = () => import('./views/TimelineDemo.vue')
+const RestTimeDentDemo = () => import('./views/RestTimeDentDemo.vue')
 const VirtualTimelineDemo = () => import('./views/VirtualTimelineDemo.vue')
 const PerformanceBenchmarkDemo = () => import('./views/PerformanceBenchmarkDemo.vue')
 const DenseVisibleTasksDemo = () => import('./views/DenseVisibleTasksDemo.vue')
@@ -55,6 +56,14 @@ export default new Router({
       component: TimelineDemo,
       meta: {
         title: '时间轴'
+      }
+    },
+    {
+      path: '/rest-time-dent',
+      name: 'rest-time-dent',
+      component: RestTimeDentDemo,
+      meta: {
+        title: '休息时间段'
       }
     },
     {

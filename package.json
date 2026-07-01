@@ -11,6 +11,7 @@
     "benchmark:gantt": "node scripts/benchmark-render.mjs",
     "check:gantt-api": "node scripts/check-gantt-api.mjs",
     "check:gantt-dist": "node scripts/check-gantt-dist.mjs",
+    "check:rest-time": "node scripts/check-rest-time-api.mjs",
     "lint": "vue-cli-service lint"
   },
   "dependencies": {
